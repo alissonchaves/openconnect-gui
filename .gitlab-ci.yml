@@ -117,18 +117,11 @@ MinGW64:
   script:
     - Push-Location \
     - Import-Module ${env:ChocolateyInstall}\helpers\chocolateyProfile.psm1
-    - choco install msys2 aqt -y --no-progress
+    - choco install msys2 -y --no-progress
     - $Env:TARGET = "package"
     - $Env:GENERATOR = '"MinGW Makefiles"'
-    - $Env:NSIS = 'C:\tools\msys64\mingw64\bin'
     - refreshenv
-    - $Env:QT6= "C:\QT"
-    - md -p "c:\qt"
-    - aqt install-qt windows desktop 6.6.0 win64_mingw -O c:\qt --modules qtscxml
     - Pop-Location
-    - $Env:QT6= (Resolve-Path c:\Qt\*\mingw_64).toString()
-    - $Env:MINGW= (Resolve-Path c:\Qt\*\mingw_64).toString()
-    - $Env:PATH += "C:\tools\msys64\;C:\Program Files\Git\usr\bin;${Env:NSIS};${Env:QT6}\bin"
     - $Env:BUILD_DIR = "build"
     - cmd.exe /c c:\tools\msys64\msys2_shell.cmd -defterm -no-start -mingw64 -where . -c "./contrib/build_deps_mingw@msys2.sh"
     - cmd.exe /c c:\tools\msys64\msys2_shell.cmd -defterm -no-start -mingw64 -use-full-path -where . -c "./contrib/build_mingw@msys2.sh"
