@@ -84,18 +84,11 @@ pacman --needed --noconfirm -S \
     mingw-w64-${BUILD_ARCH}-gmp \
     mingw-w64-${BUILD_ARCH}-p11-kit \
     mingw-w64-${BUILD_ARCH}-zlib \
-    mingw-w64-${BUILD_ARCH}-libxml2 \
+    "mingw-w64-${BUILD_ARCH}-libxml2>=2.14" \
     mingw-w64-${BUILD_ARCH}-zlib \
     mingw-w64-${BUILD_ARCH}-lz4 \
     mingw-w64-${BUILD_ARCH}-nsis \
     mingw-w64-${BUILD_ARCH}-libproxy
-
-#openconnect compilation is broken on recent versions (>=2.12) of libxml2 because of header reorg
-#(see https://gitlab.com/openconnect/openconnect/-/issues/685)
-#
-#use latest 2.11 version until openconnect is fixed
-#TODO remove the following line after bumping OC_TAG (hopefully to v9.13)
-pacman --needed --noconfirm -U https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libxml2-2.11.6-1-any.pkg.tar.zst
 
 set +e
 
@@ -200,7 +193,7 @@ cp ${MINGW_PREFIX}/bin/libnettle-8.dll .
 cp ${MINGW_PREFIX}/bin/libp11-kit-0.dll .
 cp ${MINGW_PREFIX}/bin/libtasn1-6.dll .
 cp ${MINGW_PREFIX}/bin/libwinpthread-1.dll .
-cp ${MINGW_PREFIX}/bin/libxml2-2.dll .
+cp ${MINGW_PREFIX}/bin/libxml2-16.dll .
 cp ${MINGW_PREFIX}/bin/zlib1.dll .
 cp ${MINGW_PREFIX}/bin/libstoken-1.dll .
 cp ${MINGW_PREFIX}/bin/liblz4.dll .

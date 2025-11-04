@@ -201,7 +201,11 @@ int Key::tmpfile_export(QString& filename)
     qa.append((const char*)out.data, out.size);
     gnutls_free(out.data);
 
-    tmpfile.open();
+    bool opened = tmpfile.open();
+    if (!opened) {
+        return -1;
+    }
+
     ret = tmpfile.write(qa);
     tmpfile.close();
     if (ret == -1) {
