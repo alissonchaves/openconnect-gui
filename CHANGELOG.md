@@ -5,6 +5,7 @@ History of user-visible changes.
 - Store username and password for GlobalProtect profiles (#390)
 - Fix the encoding of strings passed to OpenConnect and GnuTLS functions (#393)
 - Update spdlog (1.15.3)
+- Windows Installer filename includes OpenConnect version
 
 [Full Changelog](https://gitlab.com/openconnect/openconnect-gui/-/compare/v1.6.2...main)
 

@@ -98,4 +98,14 @@ endif()
 set(CPACK_PACKAGE_EXECUTABLES "${PROJECT_NAME}" "${PRODUCT_NAME_LONG}")
 set(CPACK_CREATE_DESKTOP_LINKS  "${PROJECT_NAME}")
 
+# custom variables to pass to cpack
+set(CPACK_OCG_OPENCONNECT_FOUND "${OPENCONNECT_FOUND}")
+set(CPACK_OCG_OPENCONNECT_VERSION "${OPENCONNECT_VERSION}")
+set(CPACK_OCG_openconnect-TAG "${openconnect-TAG}")
+set(CPACK_OCG_SOURCE_DIR "${CMAKE_SOURCE_DIR}")
+set(CPACK_OCG_BINARY_DIR "${CMAKE_BINARY_DIR}")
+
+# project settings for cpack
+set(CPACK_PROJECT_CONFIG_FILE "${CMAKE_SOURCE_DIR}/CMake/Includes/ProjectPackageConfig.cmake")
+
 include(CPack)

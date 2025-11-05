@@ -167,6 +167,12 @@ CFLAGS="${CFLAGS} -O2 -g -Wno-error=incompatible-pointer-types" ../configure --d
 #Make only openconnect.exe; openconnect 12.x fails when generating the nsis installer and
 #we do not use the installer or other created artifacts.
 mingw32-make -j${CORES} openconnect.exe
+
+#openconnect.pc has the version specified in autoconf
+#we want to have the exact version reported by running openconnect --version
+#so we hack openconnect.pc a little
+sed -i 's|\(Version: \).*|\1'$(cat version.c | sed 's/.* = "v\(.*\)";/\1/')'|' openconnect.pc
+
 cd ../../
 set +e
 

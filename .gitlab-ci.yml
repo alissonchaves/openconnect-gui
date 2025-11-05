@@ -123,14 +123,36 @@ MinGW64:
     - refreshenv
     - Pop-Location
     - $Env:BUILD_DIR = "build"
-    - cmd.exe /c c:\tools\msys64\msys2_shell.cmd -defterm -no-start -mingw64 -where . -c "./contrib/build_deps_mingw@msys2.sh"
-    - cmd.exe /c c:\tools\msys64\msys2_shell.cmd -defterm -no-start -mingw64 -use-full-path -where . -c "./contrib/build_mingw@msys2.sh"
+    - cmd.exe /c c:\tools\msys64\msys2_shell.cmd -defterm -no-start -mingw64 -where . -c "./contrib/build_deps_mingw@msys2.sh ${Env:BUILD_ARGS}"
+    - cmd.exe /c c:\tools\msys64\msys2_shell.cmd -defterm -no-start -mingw64 -use-full-path -where . -c "./contrib/build_mingw@msys2.sh ${Env:BUILD_ARGS}"
 
-WindowsNative:
+# Build against stable openconnect
+WindowsNative-stable:
   stage: testing
   extends: .WindowsTemplate
   variables:
     BUILD_TYPE: "Debug"
+    BUILD_ARGS:
+  except:
+  - schedules
+  - tags
+  artifacts:
+    expire_in: 1 week
+    when: always
+    paths:
+      - build/CMakeCache.txt
+      - build/CPack*
+      - build/openconnect-gui*.exe
+      - build/openconnect-gui*.exe.sha512
+
+# Build against latest development openconnect
+WindowsNative-latest:
+  stage: testing
+  extends: .WindowsTemplate
+  allow_failure: true
+  variables:
+    BUILD_TYPE: "Debug"
+    BUILD_ARGS: "--head"
   except:
   - schedules
   - tags
