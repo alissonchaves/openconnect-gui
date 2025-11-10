@@ -923,9 +923,16 @@ void MainWindow::readSettings()
 {
     OcSettings settings;
     settings.beginGroup("MainWindow");
-    resize(settings.value("size").toSize());
+    if (settings.contains("geometry")) {
+        restoreGeometry(settings.value("geometry").toByteArray());
+    }
+
+    //remove old settings if they exist
+    if (settings.contains("size")) {
+        settings.remove("size");
+    }
     if (settings.contains("pos")) {
-        move(settings.value("pos").toPoint());
+        settings.remove("pos");
     }
     settings.endGroup();
 
@@ -955,8 +962,7 @@ void MainWindow::writeSettings()
 {
     OcSettings settings;
     settings.beginGroup("MainWindow");
-    settings.setValue("size", size());
-    settings.setValue("pos", pos());
+    settings.setValue("geometry", saveGeometry());
     settings.endGroup();
 
     settings.beginGroup("Settings");

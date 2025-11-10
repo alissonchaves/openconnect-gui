@@ -6,6 +6,7 @@ History of user-visible changes.
 - Fix the encoding of strings passed to OpenConnect and GnuTLS functions (#393)
 - Update spdlog (1.15.3)
 - Windows Installer filename includes OpenConnect version
+- Fix Log / Main Window position /size issue (#246)
 
 [Full Changelog](https://gitlab.com/openconnect/openconnect-gui/-/compare/v1.6.2...main)
 
