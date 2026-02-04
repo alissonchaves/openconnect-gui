@@ -22,6 +22,8 @@
 #include <QProcess>
 #include <QString>
 #include <QTemporaryFile>
+#include <QStringList>
+#include <QTcpSocket>
 
 #include <atomic>
 #include <memory>
@@ -47,6 +49,13 @@ private:
     bool prepareConfigFile(QString& err);
     QString findOpenVpnBinary(QString& err) const;
     void logOutputLines(const QString& chunk);
+    void handleOpenVpnLine(const QString& line);
+    void updateOpenVpnDnsFromSystem();
+    void connectOpenVpnManagement();
+    void handleOpenVpnManagementData();
+    void pollOpenVpnManagement();
+    void handleOpenVpnManagementLine(const QString& line);
+    static QString normalizeByteSize(uint64_t bytes);
 
     StoredServer* ss;
     MainWindow* m;
@@ -56,4 +65,15 @@ private:
     std::atomic_bool stop_requested;
     QString output_buffer;
     bool connected;
+    QString openvpn_ip;
+    QString openvpn_dns;
+    QString openvpn_iface;
+    QStringList openvpn_mgmt_dns;
+    std::unique_ptr<QTcpSocket> openvpn_mgmt_socket;
+    QByteArray openvpn_mgmt_buffer;
+    quint16 openvpn_mgmt_port = 0;
+    QString openvpn_mgmt_password;
+    QString openvpn_mgmt_pass_file;
+    int openvpn_mgmt_retries = 0;
+    bool openvpn_mgmt_authed = false;
 };
