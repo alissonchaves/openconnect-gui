@@ -47,6 +47,7 @@ OpenVpnInfo::OpenVpnInfo(StoredServer* ss, MainWindow* m)
     , openvpn_ip()
     , openvpn_dns()
     , openvpn_iface()
+    , openvpn_cipher()
     , openvpn_mgmt_dns()
     , openvpn_mgmt_socket(nullptr)
     , openvpn_mgmt_buffer()
@@ -55,6 +56,7 @@ OpenVpnInfo::OpenVpnInfo(StoredServer* ss, MainWindow* m)
     , openvpn_mgmt_pass_file()
     , openvpn_mgmt_retries(0)
     , openvpn_mgmt_authed(false)
+    , openvpn_mgmt_timer()
 {
     proc->setProcessChannelMode(QProcess::MergedChannels);
 }
@@ -291,9 +293,22 @@ void OpenVpnInfo::handleOpenVpnLine(const QString& line)
             openvpn_iface = match.captured(1);
             openvpn_ip = match.captured(2);
         }
+    } else if (line.contains(QLatin1String("Data Channel: cipher"), Qt::CaseInsensitive)) {
+        const QRegularExpression re(QStringLiteral(R"(Data Channel:\s+cipher\s+'([^']+)')"), QRegularExpression::CaseInsensitiveOption);
+        const QRegularExpressionMatch match = re.match(line);
+        if (match.hasMatch()) {
+            openvpn_cipher = match.captured(1).trimmed();
+        }
     } else if (line.contains(QLatin1String("PUSH_REPLY"))) {
         QString msg = line;
         msg.replace(QLatin1Char(','), QLatin1Char(' '));
+        if (openvpn_cipher.isEmpty()) {
+            QRegularExpression cipherRe(QStringLiteral(R"(cipher\s+([^\s]+))"), QRegularExpression::CaseInsensitiveOption);
+            const QRegularExpressionMatch cipherMatch = cipherRe.match(msg);
+            if (cipherMatch.hasMatch()) {
+                openvpn_cipher = cipherMatch.captured(1).trimmed();
+            }
+        }
         QRegularExpression re(QStringLiteral(R"(dhcp-option\s+DNS\s+([^\s,]+))"));
         QRegularExpressionMatchIterator it = re.globalMatch(msg);
         bool dnsUpdated = false;
@@ -328,7 +343,7 @@ void OpenVpnInfo::handleOpenVpnLine(const QString& line)
         QString dns = openvpn_dns;
         QString ip = openvpn_ip;
         QString ip6;
-        QString cstp = QStringLiteral("OpenVPN");
+        QString cstp = openvpn_cipher.isEmpty() ? QStringLiteral("OpenVPN") : openvpn_cipher;
         QString dtls;
         m->vpn_status_changed(STATUS_CONNECTED, dns, ip, ip6, cstp, dtls);
         if (openvpn_dns.isEmpty()) {
@@ -375,6 +390,18 @@ void OpenVpnInfo::connectOpenVpnManagement()
         return;
     }
     openvpn_mgmt_retries = 0;
+    if (openvpn_mgmt_password.isEmpty()) {
+        openvpn_mgmt_authed = true;
+        const QByteArray cmds = QByteArrayLiteral("log on all\nstate on\nbytecount 1\n");
+        openvpn_mgmt_socket->write(cmds);
+        openvpn_mgmt_socket->flush();
+    } else {
+        openvpn_mgmt_socket->write(openvpn_mgmt_password.toUtf8() + QByteArrayLiteral("\n"));
+        openvpn_mgmt_socket->flush();
+        const QByteArray cmds = QByteArrayLiteral("log on all\nstate on\nbytecount 1\n");
+        openvpn_mgmt_socket->write(cmds);
+        openvpn_mgmt_socket->flush();
+    }
     handleOpenVpnManagementData();
 }
 
@@ -397,11 +424,20 @@ void OpenVpnInfo::handleOpenVpnManagementData()
 
 void OpenVpnInfo::pollOpenVpnManagement()
 {
-    if (!openvpn_mgmt_socket) {
+    if (openvpn_mgmt_socket && openvpn_mgmt_socket->waitForReadyRead(10)) {
+        handleOpenVpnManagementData();
+    }
+}
+
+void OpenVpnInfo::ensureOpenVpnManagement()
+{
+    if (openvpn_mgmt_port == 0 || openvpn_mgmt_socket || openvpn_mgmt_retries >= 5) {
         return;
     }
-    if (openvpn_mgmt_socket->waitForReadyRead(10)) {
-        handleOpenVpnManagementData();
+    if (!openvpn_mgmt_timer.isValid() || openvpn_mgmt_timer.elapsed() > 1000) {
+        openvpn_mgmt_timer.restart();
+        openvpn_mgmt_retries++;
+        connectOpenVpnManagement();
     }
 }
 
@@ -424,7 +460,7 @@ void OpenVpnInfo::handleOpenVpnManagementLine(const QString& line)
                 }
                 QString ip = openvpn_ip;
                 QString ip6;
-                QString cstp = QStringLiteral("OpenVPN");
+                QString cstp = openvpn_cipher.isEmpty() ? QStringLiteral("OpenVPN") : openvpn_cipher;
                 QString dtls;
                 m->vpn_status_changed(STATUS_CONNECTED, dns, ip, ip6, cstp, dtls);
                 if (openvpn_dns.isEmpty()) {
@@ -514,7 +550,7 @@ void OpenVpnInfo::handleOpenVpnManagementLine(const QString& line)
             openvpn_dns = openvpn_mgmt_dns.join(QLatin1String(", "));
             if (connected) {
                 QString ip6;
-                QString cstp = QStringLiteral("OpenVPN");
+                QString cstp = openvpn_cipher.isEmpty() ? QStringLiteral("OpenVPN") : openvpn_cipher;
                 QString dtls;
                 m->vpn_status_changed(STATUS_CONNECTED, openvpn_dns, openvpn_ip, ip6, cstp, dtls);
             }
@@ -611,6 +647,7 @@ void OpenVpnInfo::mainloop()
                 logOutputLines(QString::fromUtf8(data));
             }
         }
+        ensureOpenVpnManagement();
         pollOpenVpnManagement();
 
         if (proc->state() == QProcess::NotRunning) {

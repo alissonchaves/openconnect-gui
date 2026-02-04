@@ -24,6 +24,7 @@
 #include <QTemporaryFile>
 #include <QStringList>
 #include <QTcpSocket>
+#include <QElapsedTimer>
 
 #include <atomic>
 #include <memory>
@@ -56,6 +57,7 @@ private:
     void pollOpenVpnManagement();
     void handleOpenVpnManagementLine(const QString& line);
     static QString normalizeByteSize(uint64_t bytes);
+    void ensureOpenVpnManagement();
 
     StoredServer* ss;
     MainWindow* m;
@@ -68,6 +70,7 @@ private:
     QString openvpn_ip;
     QString openvpn_dns;
     QString openvpn_iface;
+    QString openvpn_cipher;
     QStringList openvpn_mgmt_dns;
     std::unique_ptr<QTcpSocket> openvpn_mgmt_socket;
     QByteArray openvpn_mgmt_buffer;
@@ -76,4 +79,5 @@ private:
     QString openvpn_mgmt_pass_file;
     int openvpn_mgmt_retries = 0;
     bool openvpn_mgmt_authed = false;
+    QElapsedTimer openvpn_mgmt_timer;
 };
