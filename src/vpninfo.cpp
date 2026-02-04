@@ -390,6 +390,7 @@ static void setup_tun_vfn(void* privdata)
 
     QByteArray vpncScriptFullPath;
     QByteArray interface_name;
+    const char* interface_name_cstr = nullptr;
 
     if (!vpn->ss->get_vpnc_script_filename().isEmpty())
         vpncScriptFullPath = native_path(vpn->ss->get_vpnc_script_filename());
@@ -399,8 +400,10 @@ static void setup_tun_vfn(void* privdata)
         vpncScriptFullPath = native_path(QCoreApplication::applicationDirPath()
                                          + "/" + QString(DEFAULT_VPNC_SCRIPT));
 
-    if (!vpn->ss->get_interface_name().isEmpty())
+    if (!vpn->ss->get_interface_name().isEmpty()) {
         interface_name = vpn->ss->get_interface_name().toUtf8();
+        interface_name_cstr = interface_name.constData();
+    }
 #ifdef _WIN32
 #if ! (OPENCONNECT_API_VERSION_MAJOR == 5 && OPENCONNECT_API_VERSION_MINOR == 9)
 #error "This probably has been fixed in openconnect in API version >= 5.9 and this workaround is not required anymore."
@@ -414,6 +417,7 @@ static void setup_tun_vfn(void* privdata)
         //So, use this "unique" interface name as a workaround to force wintun from openconnect.
         //See openconnect-gui#357 (comment 1758999655) and openconnect#699
         interface_name = vpn->generateUniqueInterfaceName();
+        interface_name_cstr = interface_name.constData();
 
         Logger::instance().addMessage(QObject::tr("Using generated interface name %1").arg(QString::fromUtf8(interface_name)));
     }
@@ -421,7 +425,7 @@ static void setup_tun_vfn(void* privdata)
 
     int ret = openconnect_setup_tun_device(vpn->vpninfo,
                                            vpncScriptFullPath.constData(),
-                                           interface_name.constData());
+                                           interface_name_cstr);
     if (ret != 0) {
         vpn->last_err = QObject::tr("Error setting up the TUN device");
         //FIXME: ???        return ret;
