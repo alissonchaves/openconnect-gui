@@ -314,7 +314,8 @@ void OpenVpnInfo::handleOpenVpnLine(const QString& line)
         bool dnsUpdated = false;
         while (it.hasNext()) {
             const QRegularExpressionMatch m = it.next();
-            const QString dns = m.captured(1);
+            QString dns = m.captured(1).trimmed();
+            dns.remove(QLatin1Char('\''));
             if (!dns.isEmpty() && !openvpn_mgmt_dns.contains(dns)) {
                 openvpn_mgmt_dns << dns;
                 dnsUpdated = true;
@@ -332,9 +333,19 @@ void OpenVpnInfo::handleOpenVpnLine(const QString& line)
     } else if (line.contains(QLatin1String("dhcp-option DNS"))) {
         QString normalized = line;
         normalized.replace(QLatin1Char(','), QLatin1Char(' '));
-        const QStringList parts = normalized.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
-        if (parts.size() >= 3) {
-            openvpn_dns = parts.at(2);
+        QRegularExpression re(QStringLiteral(R"(dhcp-option\s+DNS\s+([^\s,]+))"));
+        QRegularExpressionMatchIterator it = re.globalMatch(normalized);
+        QStringList dnsList;
+        while (it.hasNext()) {
+            const QRegularExpressionMatch m = it.next();
+            QString dns = m.captured(1).trimmed();
+            dns.remove(QLatin1Char('\''));
+            if (!dns.isEmpty() && !dnsList.contains(dns)) {
+                dnsList << dns;
+            }
+        }
+        if (!dnsList.isEmpty()) {
+            openvpn_dns = dnsList.join(QLatin1String(", "));
         }
     }
 
