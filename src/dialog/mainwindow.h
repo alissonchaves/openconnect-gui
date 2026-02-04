@@ -46,6 +46,7 @@ extern "C" {
 
 class LogDialog;
 class QStateMachine;
+class OpenVpnInfo;
 
 namespace Ui {
 class MainWindow;
@@ -132,6 +133,8 @@ private:
     QTimer* timer;
     QTimer* blink_timer;
     QFutureWatcher<void> futureWatcher; // watches the vpninfo
+    OpenVpnInfo* openvpninfo = nullptr;
+    QString current_protocol;
 
     QString dns;
     QString ip;

@@ -24,8 +24,11 @@
 #include "ui_editdialog.h"
 #include <QFileDialog>
 #include <QItemSelectionModel>
+#include <QFileInfo>
 #include <QListWidget>
 #include <QMessageBox>
+#include "openvpn_import.h"
+#include <QRegularExpression>
 
 #ifdef USE_SYSTEM_KEYS
 extern "C" {
@@ -185,6 +188,7 @@ EditDialog::EditDialog(QString server, QWidget* parent)
     ui->protocolComboBox->setCurrentIndex(model->findIndex(ss->get_protocol_name()));
     ui->interfaceNameEdit->setText(ss->get_interface_name());
     ui->vpncScriptEdit->setText(ss->get_vpnc_script_filename());
+    updateGatewayUiForProtocol(ss->get_protocol_name());
 
     type = loglevel_tab(ss->get_log_level());
     if (type != -1) {
@@ -202,6 +206,121 @@ EditDialog::~EditDialog()
     delete ss;
 }
 
+void EditDialog::updateGatewayUiForProtocol(const QString& protocol_name)
+{
+    ui->openvpnImportButton->setVisible(protocol_name == QLatin1String(OCG_PROTO_OPENVPN));
+    ui->openvpnDetailsButton->setVisible(protocol_name == QLatin1String(OCG_PROTO_OPENVPN));
+    if (protocol_name == QLatin1String(OCG_PROTO_OPENVPN)) {
+        ui->gatewayLabel->setText(tr("OpenVPN Config"));
+        ui->gatewayEdit->setPlaceholderText(tr("/path/to/config.ovpn"));
+        if (ss->get_openvpn_config().isEmpty()) {
+            ui->gatewayEdit->setToolTip(tr("Path to the OpenVPN configuration file"));
+        } else {
+            ui->gatewayEdit->setToolTip(tr("Imported OpenVPN config stored in the profile (file path not saved)"));
+            if (ui->gatewayEdit->text().isEmpty()) {
+                ui->gatewayEdit->setPlaceholderText(tr("Imported config in profile"));
+            }
+        }
+    } else {
+        ui->gatewayLabel->setText(tr("Gateway"));
+        ui->gatewayEdit->setPlaceholderText(tr("https://my_server[:443]/[usergroup]"));
+        ui->gatewayEdit->setToolTip(tr("Specify the hostname to connect to; a port may be specified after the host separated with a colon ':'"));
+    }
+}
+
+void EditDialog::on_protocolComboBox_currentIndexChanged(int)
+{
+    const QString protocol_name = ui->protocolComboBox->currentData(ROLE_PROTOCOL_NAME).toString();
+    updateGatewayUiForProtocol(protocol_name);
+}
+
+
+void EditDialog::on_openvpnImportButton_clicked()
+{
+    const QString file_path = QFileDialog::getOpenFileName(
+        this,
+        tr("Import OpenVPN config"),
+        ui->gatewayEdit->text(),
+        tr("OpenVPN Config (*.ovpn *.conf);;All Files (*.*)"));
+    if (file_path.isEmpty()) {
+        return;
+    }
+
+    QString config;
+    QString err;
+    if (import_openvpn_config(file_path, config, err) == false) {
+        QMessageBox::information(this, qApp->applicationName(), err);
+        return;
+    }
+
+    ss->set_openvpn_config(config);
+    ui->gatewayEdit->setText(file_path);
+    updateGatewayUiForProtocol(OCG_PROTO_OPENVPN);
+}
+
+static QString first_match_or_empty(const QString& input, const QRegularExpression& re, int capture = 1)
+{
+    const QRegularExpressionMatch m = re.match(input);
+    if (m.hasMatch()) {
+        return m.captured(capture).trimmed();
+    }
+    return {};
+}
+
+void EditDialog::showOpenVpnDetails()
+{
+    const QString cfg = ss->get_openvpn_config();
+    if (cfg.isEmpty()) {
+        QMessageBox::information(this, qApp->applicationName(),
+            tr("OpenVPN config not imported yet."));
+        return;
+    }
+
+    const QRegularExpression remote_re(QStringLiteral(R"(^\s*remote\s+(\S+)\s+(\d+))"),
+        QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption);
+    const QRegularExpression proto_re(QStringLiteral(R"(^\s*proto\s+(\S+))"),
+        QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption);
+    const QRegularExpression dev_re(QStringLiteral(R"(^\s*dev\s+(\S+))"),
+        QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption);
+    const QRegularExpression auth_re(QStringLiteral(R"(^\s*auth\s+(\S+))"),
+        QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption);
+
+    QString remote_host, remote_port;
+    const QRegularExpressionMatch remote_m = remote_re.match(cfg);
+    if (remote_m.hasMatch()) {
+        remote_host = remote_m.captured(1).trimmed();
+        remote_port = remote_m.captured(2).trimmed();
+    }
+
+    const QString proto = first_match_or_empty(cfg, proto_re);
+    const QString dev = first_match_or_empty(cfg, dev_re);
+    const QString auth = first_match_or_empty(cfg, auth_re);
+
+    QString tls_mode;
+    if (cfg.contains(QRegularExpression(QStringLiteral(R"(^\s*(tls-crypt)\b)"),
+        QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption))) {
+        tls_mode = QStringLiteral("tls-crypt");
+    } else if (cfg.contains(QRegularExpression(QStringLiteral(R"(^\s*(tls-auth)\b)"),
+        QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption))) {
+        tls_mode = QStringLiteral("tls-auth");
+    }
+
+    QStringList lines;
+    lines << tr("Remote: %1").arg(remote_host.isEmpty() ? tr("(not set)") : remote_host);
+    lines << tr("Port: %1").arg(remote_port.isEmpty() ? tr("(not set)") : remote_port);
+    lines << tr("Proto: %1").arg(proto.isEmpty() ? tr("(not set)") : proto);
+    lines << tr("Dev: %1").arg(dev.isEmpty() ? tr("(not set)") : dev);
+    lines << tr("Auth: %1").arg(auth.isEmpty() ? tr("(not set)") : auth);
+    lines << tr("TLS mode: %1").arg(tls_mode.isEmpty() ? tr("(not set)") : tls_mode);
+
+    QMessageBox::information(this, tr("OpenVPN Details"), lines.join("\n"));
+}
+
+void EditDialog::on_openvpnDetailsButton_clicked()
+{
+    showOpenVpnDetails();
+}
+
 QString EditDialog::getEditedProfileName() const
 {
     return ss->get_label();
@@ -209,7 +328,8 @@ QString EditDialog::getEditedProfileName() const
 
 void EditDialog::on_buttonBox_accepted()
 {
-    if (ui->gatewayEdit->text().isEmpty() == true) {
+    if (ui->gatewayEdit->text().isEmpty() == true
+        && ui->protocolComboBox->currentData(ROLE_PROTOCOL_NAME).toString() != QLatin1String(OCG_PROTO_OPENVPN)) {
         QMessageBox::information(this,
             qApp->applicationName(),
             tr("You need to specify a gateway. E.g. vpn.example.com:443"));
@@ -288,6 +408,15 @@ void EditDialog::on_buttonBox_accepted()
     ss->set_protocol_name(ui->protocolComboBox->currentData(ROLE_PROTOCOL_NAME).toString());
     ss->set_interface_name(ui->interfaceNameEdit->text());
     ss->set_vpnc_script_filename(ui->vpncScriptEdit->text());
+
+    if (ss->get_protocol_name() == QLatin1String(OCG_PROTO_OPENVPN)) {
+        if (ss->get_openvpn_config().isEmpty()) {
+            QMessageBox::information(this, qApp->applicationName(),
+                tr("Please import the OpenVPN config using the Import button."));
+            return;
+        }
+        ss->set_server_gateway(QString());
+    }
 
     type = ui->loglevelBox->currentIndex();
     if (type == -1) {

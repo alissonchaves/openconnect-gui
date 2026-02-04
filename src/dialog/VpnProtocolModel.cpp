@@ -3,6 +3,8 @@
 #include "common.h"
 #include "logger.h"
 
+#include <QStandardPaths>
+
 VpnProtocolModel::VpnProtocolModel(QObject* parent)
     : QAbstractListModel(parent)
 {
@@ -61,4 +63,10 @@ void VpnProtocolModel::loadProtocols()
         }
         openconnect_free_supported_protocols(protos);
     }
+
+    const QString openvpn_path = QStandardPaths::findExecutable(QStringLiteral("openvpn"));
+    const QString openvpn_desc = openvpn_path.isEmpty()
+        ? QObject::tr("OpenVPN (external client, not found in PATH)")
+        : QObject::tr("OpenVPN (external client)");
+    m_protocols.append({ i++, QLatin1String(OCG_PROTO_OPENVPN), QStringLiteral("OpenVPN"), openvpn_desc });
 }

@@ -25,6 +25,8 @@ set(${PROJECT_NAME}_SRCS
     key.cpp
     keypair.cpp
     main.cpp
+    openvpninfo.cpp
+    openvpn_import.cpp
     server_storage.cpp
 
     timestamp.cpp

@@ -64,17 +64,31 @@
       </widget>
      </item>
      <item row="1" column="1">
-      <widget class="QLineEdit" name="lineEditGateway">
-       <property name="toolTip">
-        <string>Specify the hostname to connect to; a port may be specified after the host separated with a colon ':'</string>
-       </property>
-       <property name="placeholderText">
-        <string>https://my_server[:443]/[usergroup]</string>
-       </property>
-       <property name="clearButtonEnabled">
-        <bool>true</bool>
-       </property>
-      </widget>
+      <layout class="QHBoxLayout" name="gatewayLayout">
+       <item>
+        <widget class="QLineEdit" name="lineEditGateway">
+         <property name="toolTip">
+          <string>Specify the hostname to connect to; a port may be specified after the host separated with a colon ':'</string>
+         </property>
+         <property name="placeholderText">
+          <string>https://my_server[:443]/[usergroup]</string>
+         </property>
+         <property name="clearButtonEnabled">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QToolButton" name="openvpnImportButton">
+         <property name="text">
+          <string>Import</string>
+         </property>
+         <property name="toolTip">
+          <string>Import OpenVPN configuration (.ovpn)</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
      </item>
      <item row="2" column="0">
       <widget class="QLabel" name="protocolLabel">

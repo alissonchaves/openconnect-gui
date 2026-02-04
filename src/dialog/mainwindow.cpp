@@ -26,6 +26,7 @@
 #include "server_storage.h"
 #include "timestamp.h"
 #include "ui_mainwindow.h"
+#include "openvpninfo.h"
 #include "vpninfo.h"
 #include "logger.h"
 
@@ -38,6 +39,7 @@ extern "C" {
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDialog>
+#include <QRegularExpression>
 #include <QEventTransition>
 #include <QFileSelector>
 #include <QFutureWatcher>
@@ -138,6 +140,10 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName)
     connect(this, &MainWindow::stats_changed_sig,
         this, &MainWindow::statsChanged,
         Qt::QueuedConnection);
+    connect(&futureWatcher, &QFutureWatcher<void>::finished, [this]() {
+        this->openvpninfo = nullptr;
+        this->current_protocol.clear();
+    });
 
     ui->iconLabel->setPixmap(OFF_ICON);
     QNetworkProxyFactory::setUseSystemConfiguration(true);
@@ -379,7 +385,15 @@ MainWindow::~MainWindow()
     }
 
     if (this->futureWatcher.isRunning() == true) {
-        term_thread(this, &this->cmd_fd);
+        if (current_protocol == QLatin1String(OCG_PROTO_OPENVPN)) {
+            if (openvpninfo) {
+                openvpninfo->requestStop();
+            } else {
+                this->vpn_status_changed(STATUS_DISCONNECTED);
+            }
+        } else {
+            term_thread(this, &this->cmd_fd);
+        }
     }
     while (this->futureWatcher.isRunning() == true && counter > 0) {
         ms_sleep(200);
@@ -733,18 +747,48 @@ fail: // LCA: drop this 'goto' and optimize values...
     delete vpninfo;
 }
 
+static void openvpn_main_loop(OpenVpnInfo* ovpninfo, MainWindow* m)
+{
+    m->vpn_status_changed(STATUS_CONNECTING);
+
+    const int ret = ovpninfo->connect();
+    if (ret != 0) {
+        Logger::instance().addMessage(QObject::tr("OpenVPN connection failed: %1").arg(ovpninfo->last_err));
+        m->vpn_status_changed(STATUS_DISCONNECTED);
+        delete ovpninfo;
+        return;
+    }
+
+    ovpninfo->saveProfile();
+    ovpninfo->mainloop();
+
+    m->vpn_status_changed(STATUS_DISCONNECTED);
+    delete ovpninfo;
+}
+
 void MainWindow::on_disconnectClicked()
 {
     if (this->timer->isActive()) {
         this->timer->stop();
     }
     Logger::instance().addMessage(QObject::tr("Disconnecting..."));
+    if (current_protocol == QLatin1String(OCG_PROTO_OPENVPN)) {
+        this->vpn_status_changed(STATUS_DISCONNECTING);
+        if (openvpninfo) {
+            openvpninfo->requestStop();
+        } else {
+            this->vpn_status_changed(STATUS_DISCONNECTED);
+        }
+        return;
+    }
+
     term_thread(this, &this->cmd_fd);
 }
 
 void MainWindow::on_connectClicked()
 {
     VpnInfo* vpninfo = nullptr;
+    OpenVpnInfo* ovpninfo = nullptr;
     StoredServer* ss = nullptr;
     QFuture<void> future;
     QString name, url;
@@ -818,6 +862,28 @@ void MainWindow::on_connectClicked()
         } else {
             turl.setUrl("https://" + ss->get_server_gateway());
         }
+    }
+
+    this->current_protocol = ss->get_protocol_name();
+
+    if (current_protocol == QLatin1String(OCG_PROTO_OPENVPN)) {
+        if (ss->get_openvpn_config().isEmpty()) {
+            QMessageBox::information(this,
+                qApp->applicationName(),
+                tr("You need to specify or import an OpenVPN config file."));
+            delete ss;
+            return;
+        }
+
+        this->minimize_on_connect = ss->get_minimize();
+        this->cmd_fd = INVALID_SOCKET;
+
+        ovpninfo = new OpenVpnInfo(ss, this);
+        this->openvpninfo = ovpninfo;
+
+        future = QtConcurrent::run(openvpn_main_loop, ovpninfo, this);
+        this->futureWatcher.setFuture(future);
+        return;
     }
 
     query.setUrl(turl);

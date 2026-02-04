@@ -171,10 +171,17 @@ int StoredServer::load(QString& name)
 
     settings.beginGroup(PREFIX + name);
 
+    m_protocol_name = settings.value("protocol-name").toString();
+    m_openvpn_config = settings.value("openvpn-config").toString();
+
     this->m_server_gateway = settings.value("server").toString();
     if (this->m_server_gateway.isEmpty() == true) {
         this->m_server_gateway = name;
-        rval = 0;
+        if (m_protocol_name == QLatin1String(OCG_PROTO_OPENVPN) && m_openvpn_config.isEmpty() == false) {
+            rval = 1;
+        } else {
+            rval = 0;
+        }
     }
 
     this->m_username = settings.value("username").toString();
@@ -239,8 +246,6 @@ int StoredServer::load(QString& name)
 
     this->m_token_type = settings.value("token-type").toInt();
 
-    m_protocol_name = settings.value("protocol-name").toString();
-
     m_interface_name = settings.value("interface-name").toString();
 #ifdef _WIN32
     /* truncate interface name to OC_IFNAME_MAX_LENGTH in case it was saved by a previous version
@@ -301,6 +306,11 @@ int StoredServer::save()
         settings.remove("log-level");
     else
         settings.setValue("log-level", m_log_level);
+    if (m_openvpn_config.isEmpty()) {
+        settings.remove("openvpn-config");
+    } else {
+        settings.setValue("openvpn-config", m_openvpn_config);
+    }
 
     settings.endGroup();
     return 0;
@@ -466,6 +476,16 @@ void StoredServer::set_protocol_name(const QString name)
     m_protocol_name = name;
 }
 
+const QString& StoredServer::get_openvpn_config() const
+{
+    return this->m_openvpn_config;
+}
+
+void StoredServer::set_openvpn_config(const QString& openvpn_config)
+{
+    this->m_openvpn_config = openvpn_config;
+}
+
 void StoredServer::set_server_pin(const unsigned algo, const QByteArray& hash)
 {
     this->m_server_pin_algo = algo;
@@ -510,4 +530,3 @@ void StoredServer::set_log_level(const int log_level)
 {
     this->m_log_level = log_level;
 }
-
