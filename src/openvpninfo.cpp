@@ -107,7 +107,7 @@ bool OpenVpnInfo::prepareAuthFile(QString& err)
 
 bool OpenVpnInfo::prepareConfigFile(QString& err)
 {
-    if (ss->get_openvpn_config().isEmpty()) {
+    if (ss->get_openvpn_config_text().isEmpty()) {
         return true;
     }
 
@@ -120,7 +120,7 @@ bool OpenVpnInfo::prepareConfigFile(QString& err)
 
     config_file->setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ReadGroup | QFileDevice::ReadOther);
     QTextStream out(config_file.get());
-    out << ss->get_openvpn_config();
+    out << ss->get_openvpn_config_text();
     out.flush();
     config_file->flush();
     Logger::instance().addMessage(QObject::tr("OpenVPN config temp file: %1").arg(config_file->fileName()));
@@ -138,14 +138,14 @@ static bool config_requires_auth(const QString& cfg)
 int OpenVpnInfo::connect()
 {
     QString err;
-    if (ss->get_openvpn_config().isEmpty()) {
+    if (ss->get_openvpn_config_text().isEmpty()) {
         last_err = QObject::tr("OpenVPN config is missing from the profile");
         return -1;
     }
 
     QString username = ss->get_username();
     QString password = ss->get_password();
-    const bool has_auth_directive = config_requires_auth(ss->get_openvpn_config());
+    const bool has_auth_directive = config_requires_auth(ss->get_openvpn_config_text());
     if (has_auth_directive) {
         bool ok = true;
         if (username.isEmpty()) {
@@ -194,8 +194,6 @@ int OpenVpnInfo::connect()
     QStringList args;
     if (config_file != nullptr) {
         args << "--config" << config_file->fileName();
-    } else {
-        args << "--config" << ss->get_server_gateway();
     }
     if (auth_file != nullptr) {
         args << "--auth-user-pass" << auth_file->fileName();

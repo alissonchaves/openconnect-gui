@@ -21,6 +21,7 @@ NewProfileDialog::NewProfileDialog(QWidget* parent)
     , ui(new Ui::NewProfileDialog)
     , openvpn_config_imported()
     , openvpn_import_path()
+    , openvpn_config_parsed()
 {
     ui->setupUi(this);
     VpnProtocolModel* model = new VpnProtocolModel(this);
@@ -119,6 +120,7 @@ void NewProfileDialog::on_lineEditGateway_textChanged(const QString& text)
         if (openvpn_import_path.isEmpty() == false && text != openvpn_import_path) {
             openvpn_config_imported.clear();
             openvpn_import_path.clear();
+            openvpn_config_parsed = OpenVpnConfig{};
         }
     }
 
@@ -201,6 +203,7 @@ void NewProfileDialog::on_protocolComboBox_currentIndexChanged(int)
     if (protocol_name != QLatin1String(OCG_PROTO_OPENVPN)) {
         openvpn_config_imported.clear();
         openvpn_import_path.clear();
+        openvpn_config_parsed = OpenVpnConfig{};
     }
 }
 
@@ -217,7 +220,8 @@ void NewProfileDialog::on_openvpnImportButton_clicked()
 
     QString config;
     QString err;
-    if (import_openvpn_config(file_path, config, err) == false) {
+    OpenVpnConfig cfg;
+    if (import_openvpn_config(file_path, cfg, config, err) == false) {
         QMessageBox::information(this, qApp->applicationName(), err);
         return;
     }
@@ -228,6 +232,7 @@ void NewProfileDialog::on_openvpnImportButton_clicked()
 
     openvpn_config_imported = config;
     openvpn_import_path = file_path;
+    openvpn_config_parsed = cfg;
 }
 
 void NewProfileDialog::on_buttonBox_clicked(QAbstractButton* button)
@@ -249,7 +254,33 @@ void NewProfileDialog::on_buttonBox_accepted()
                 tr("Please import the OpenVPN config using the Import button."));
             return;
         }
-        ss->set_openvpn_config(openvpn_config_imported);
+        ss->set_openvpn_config_text(openvpn_config_imported);
+        ss->set_openvpn_config(QString());
+        ss->set_openvpn_remote_host(openvpn_config_parsed.remote_host);
+        ss->set_openvpn_remote_port(openvpn_config_parsed.remote_port);
+        ss->set_openvpn_remote_proto(openvpn_config_parsed.remote_proto);
+        ss->set_openvpn_dev(openvpn_config_parsed.dev);
+        ss->set_openvpn_cipher(openvpn_config_parsed.cipher);
+        ss->set_openvpn_data_ciphers(openvpn_config_parsed.data_ciphers);
+        ss->set_openvpn_data_ciphers_fallback(openvpn_config_parsed.data_ciphers_fallback);
+        ss->set_openvpn_auth(openvpn_config_parsed.auth);
+        ss->set_openvpn_auth_user_pass(openvpn_config_parsed.auth_user_pass);
+        ss->set_openvpn_remote_cert_tls(openvpn_config_parsed.remote_cert_tls);
+        ss->set_openvpn_compress(openvpn_config_parsed.compress);
+        ss->set_openvpn_resolv_retry(openvpn_config_parsed.resolv_retry);
+        ss->set_openvpn_nobind(openvpn_config_parsed.nobind);
+        ss->set_openvpn_persist_tun(openvpn_config_parsed.persist_tun);
+        ss->set_openvpn_persist_key(openvpn_config_parsed.persist_key);
+        ss->set_openvpn_ncp_disable(openvpn_config_parsed.ncp_disable);
+        ss->set_openvpn_tls_client(openvpn_config_parsed.tls_client);
+        ss->set_openvpn_client(openvpn_config_parsed.client);
+        ss->set_openvpn_setenv_client_cert(openvpn_config_parsed.setenv_client_cert);
+        ss->set_openvpn_key_direction(openvpn_config_parsed.key_direction);
+        ss->set_openvpn_ca(openvpn_config_parsed.ca);
+        ss->set_openvpn_cert(openvpn_config_parsed.cert);
+        ss->set_openvpn_key(openvpn_config_parsed.key);
+        ss->set_openvpn_tls_auth(openvpn_config_parsed.tls_auth);
+        ss->set_openvpn_tls_crypt(openvpn_config_parsed.tls_crypt);
         ss->set_server_gateway(QString());
     }
     ss->save();

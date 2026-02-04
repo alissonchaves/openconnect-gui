@@ -26,6 +26,7 @@ set(${PROJECT_NAME}_SRCS
     keypair.cpp
     main.cpp
     openvpninfo.cpp
+    openvpn_config.cpp
     openvpn_import.cpp
     server_storage.cpp
 

@@ -3,6 +3,8 @@
 #include <QDialog>
 #include <QUrl>
 
+#include "openvpn_config.h"
+
 class QAbstractButton;
 namespace Ui {
 class NewProfileDialog;
@@ -46,4 +48,5 @@ private:
     bool quick_connect;
     QString openvpn_config_imported;
     QString openvpn_import_path;
+    OpenVpnConfig openvpn_config_parsed;
 };

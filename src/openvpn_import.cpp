@@ -36,7 +36,7 @@ static QString read_file_text(const QString& path, QString& err)
     return QString::fromUtf8(data);
 }
 
-bool import_openvpn_config(const QString& file_path, QString& out_config, QString& err)
+bool import_openvpn_config(const QString& file_path, OpenVpnConfig& out_cfg, QString& out_text, QString& err)
 {
     QFileInfo fi(file_path);
     if (fi.exists() == false || fi.isFile() == false) {
@@ -134,6 +134,6 @@ bool import_openvpn_config(const QString& file_path, QString& out_config, QStrin
         out_lines << line;
     }
 
-    out_config = out_lines.join('\n');
-    return true;
+    out_text = out_lines.join('\n');
+    return parse_openvpn_config_text(out_text, out_cfg, &err);
 }

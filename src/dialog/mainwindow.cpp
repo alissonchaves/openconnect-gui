@@ -867,7 +867,7 @@ void MainWindow::on_connectClicked()
     this->current_protocol = ss->get_protocol_name();
 
     if (current_protocol == QLatin1String(OCG_PROTO_OPENVPN)) {
-        if (ss->get_openvpn_config().isEmpty()) {
+        if (ss->get_openvpn_config_text().isEmpty()) {
             QMessageBox::information(this,
                 qApp->applicationName(),
                 tr("You need to specify or import an OpenVPN config file."));

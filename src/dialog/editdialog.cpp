@@ -21,14 +21,13 @@
 #include "VpnProtocolModel.h"
 #include "common.h"
 #include "server_storage.h"
+#include "openvpn_config.h"
 #include "ui_editdialog.h"
 #include <QFileDialog>
 #include <QItemSelectionModel>
 #include <QFileInfo>
 #include <QListWidget>
 #include <QMessageBox>
-#include "openvpn_import.h"
-#include <QRegularExpression>
 
 #ifdef USE_SYSTEM_KEYS
 extern "C" {
@@ -144,6 +143,18 @@ EditDialog::EditDialog(QString server, QWidget* parent)
 {
     ui->setupUi(this);
 
+    connect(ui->settingsTabWidget, &QTabWidget::currentChanged, this, [this](int) {
+        QWidget* current = ui->settingsTabWidget->currentWidget();
+        if (current == nullptr) {
+            return;
+        }
+        const int h = current->sizeHint().height()
+            + ui->settingsTabWidget->tabBar()->sizeHint().height()
+            + 16;
+        ui->settingsTabWidget->setMinimumHeight(h);
+        ui->settingsTabWidget->setMaximumHeight(h);
+    });
+
 #ifdef _WIN32
     ui->interfaceNameEdit->setMaxLength(OC_IFNAME_MAX_LENGTH);
 #endif
@@ -188,6 +199,33 @@ EditDialog::EditDialog(QString server, QWidget* parent)
     ui->protocolComboBox->setCurrentIndex(model->findIndex(ss->get_protocol_name()));
     ui->interfaceNameEdit->setText(ss->get_interface_name());
     ui->vpncScriptEdit->setText(ss->get_vpnc_script_filename());
+
+    ui->openvpnRemoteHostEdit->setText(ss->get_openvpn_remote_host());
+    ui->openvpnRemotePortEdit->setText(ss->get_openvpn_remote_port());
+    ui->openvpnRemoteProtoEdit->setText(ss->get_openvpn_remote_proto());
+    ui->openvpnDevEdit->setText(ss->get_openvpn_dev());
+    ui->openvpnCipherEdit->setText(ss->get_openvpn_cipher());
+    ui->openvpnDataCiphersEdit->setText(ss->get_openvpn_data_ciphers());
+    ui->openvpnDataCiphersFallbackEdit->setText(ss->get_openvpn_data_ciphers_fallback());
+    ui->openvpnAuthEdit->setText(ss->get_openvpn_auth());
+    ui->openvpnAuthUserPassCheck->setChecked(ss->get_openvpn_auth_user_pass());
+    ui->openvpnRemoteCertTlsEdit->setText(ss->get_openvpn_remote_cert_tls());
+    ui->openvpnCompressEdit->setText(ss->get_openvpn_compress());
+    ui->openvpnResolvRetryEdit->setText(ss->get_openvpn_resolv_retry());
+    ui->openvpnNoBindCheck->setChecked(ss->get_openvpn_nobind());
+    ui->openvpnPersistTunCheck->setChecked(ss->get_openvpn_persist_tun());
+    ui->openvpnPersistKeyCheck->setChecked(ss->get_openvpn_persist_key());
+    ui->openvpnNcpDisableCheck->setChecked(ss->get_openvpn_ncp_disable());
+    ui->openvpnTlsClientCheck->setChecked(ss->get_openvpn_tls_client());
+    ui->openvpnClientCheck->setChecked(ss->get_openvpn_client());
+    ui->openvpnSetenvClientCertEdit->setText(ss->get_openvpn_setenv_client_cert());
+    ui->openvpnKeyDirectionEdit->setText(ss->get_openvpn_key_direction());
+    ui->openvpnCaEdit->setPlainText(ss->get_openvpn_ca());
+    ui->openvpnCertEdit->setPlainText(ss->get_openvpn_cert());
+    ui->openvpnKeyEdit->setPlainText(ss->get_openvpn_key());
+    ui->openvpnTlsAuthEdit->setPlainText(ss->get_openvpn_tls_auth());
+    ui->openvpnTlsCryptEdit->setPlainText(ss->get_openvpn_tls_crypt());
+
     updateGatewayUiForProtocol(ss->get_protocol_name());
 
     type = loglevel_tab(ss->get_log_level());
@@ -208,23 +246,32 @@ EditDialog::~EditDialog()
 
 void EditDialog::updateGatewayUiForProtocol(const QString& protocol_name)
 {
-    ui->openvpnImportButton->setVisible(protocol_name == QLatin1String(OCG_PROTO_OPENVPN));
-    ui->openvpnDetailsButton->setVisible(protocol_name == QLatin1String(OCG_PROTO_OPENVPN));
     if (protocol_name == QLatin1String(OCG_PROTO_OPENVPN)) {
-        ui->gatewayLabel->setText(tr("OpenVPN Config"));
-        ui->gatewayEdit->setPlaceholderText(tr("/path/to/config.ovpn"));
-        if (ss->get_openvpn_config().isEmpty()) {
-            ui->gatewayEdit->setToolTip(tr("Path to the OpenVPN configuration file"));
-        } else {
-            ui->gatewayEdit->setToolTip(tr("Imported OpenVPN config stored in the profile (file path not saved)"));
-            if (ui->gatewayEdit->text().isEmpty()) {
-                ui->gatewayEdit->setPlaceholderText(tr("Imported config in profile"));
-            }
+        ui->gatewayLabel->setVisible(false);
+        ui->gatewayEdit->setVisible(false);
+        ui->caCertificateLabel->setVisible(false);
+        ui->caCertButton->setVisible(false);
+        ui->caCertEdit->setVisible(false);
+        ui->caCertClear->setVisible(false);
+        const int idx = ui->settingsTabWidget->indexOf(ui->openvpnTab);
+        if (idx >= 0) {
+            ui->settingsTabWidget->setTabEnabled(idx, true);
+            ui->settingsTabWidget->setCurrentIndex(idx);
         }
     } else {
         ui->gatewayLabel->setText(tr("Gateway"));
         ui->gatewayEdit->setPlaceholderText(tr("https://my_server[:443]/[usergroup]"));
         ui->gatewayEdit->setToolTip(tr("Specify the hostname to connect to; a port may be specified after the host separated with a colon ':'"));
+        ui->gatewayLabel->setVisible(true);
+        ui->gatewayEdit->setVisible(true);
+        ui->caCertificateLabel->setVisible(true);
+        ui->caCertButton->setVisible(true);
+        ui->caCertEdit->setVisible(true);
+        ui->caCertClear->setVisible(true);
+        const int idx = ui->settingsTabWidget->indexOf(ui->openvpnTab);
+        if (idx >= 0) {
+            ui->settingsTabWidget->setTabEnabled(idx, false);
+        }
     }
 }
 
@@ -235,91 +282,6 @@ void EditDialog::on_protocolComboBox_currentIndexChanged(int)
 }
 
 
-void EditDialog::on_openvpnImportButton_clicked()
-{
-    const QString file_path = QFileDialog::getOpenFileName(
-        this,
-        tr("Import OpenVPN config"),
-        ui->gatewayEdit->text(),
-        tr("OpenVPN Config (*.ovpn *.conf);;All Files (*.*)"));
-    if (file_path.isEmpty()) {
-        return;
-    }
-
-    QString config;
-    QString err;
-    if (import_openvpn_config(file_path, config, err) == false) {
-        QMessageBox::information(this, qApp->applicationName(), err);
-        return;
-    }
-
-    ss->set_openvpn_config(config);
-    ui->gatewayEdit->setText(file_path);
-    updateGatewayUiForProtocol(OCG_PROTO_OPENVPN);
-}
-
-static QString first_match_or_empty(const QString& input, const QRegularExpression& re, int capture = 1)
-{
-    const QRegularExpressionMatch m = re.match(input);
-    if (m.hasMatch()) {
-        return m.captured(capture).trimmed();
-    }
-    return {};
-}
-
-void EditDialog::showOpenVpnDetails()
-{
-    const QString cfg = ss->get_openvpn_config();
-    if (cfg.isEmpty()) {
-        QMessageBox::information(this, qApp->applicationName(),
-            tr("OpenVPN config not imported yet."));
-        return;
-    }
-
-    const QRegularExpression remote_re(QStringLiteral(R"(^\s*remote\s+(\S+)\s+(\d+))"),
-        QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption);
-    const QRegularExpression proto_re(QStringLiteral(R"(^\s*proto\s+(\S+))"),
-        QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption);
-    const QRegularExpression dev_re(QStringLiteral(R"(^\s*dev\s+(\S+))"),
-        QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption);
-    const QRegularExpression auth_re(QStringLiteral(R"(^\s*auth\s+(\S+))"),
-        QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption);
-
-    QString remote_host, remote_port;
-    const QRegularExpressionMatch remote_m = remote_re.match(cfg);
-    if (remote_m.hasMatch()) {
-        remote_host = remote_m.captured(1).trimmed();
-        remote_port = remote_m.captured(2).trimmed();
-    }
-
-    const QString proto = first_match_or_empty(cfg, proto_re);
-    const QString dev = first_match_or_empty(cfg, dev_re);
-    const QString auth = first_match_or_empty(cfg, auth_re);
-
-    QString tls_mode;
-    if (cfg.contains(QRegularExpression(QStringLiteral(R"(^\s*(tls-crypt)\b)"),
-        QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption))) {
-        tls_mode = QStringLiteral("tls-crypt");
-    } else if (cfg.contains(QRegularExpression(QStringLiteral(R"(^\s*(tls-auth)\b)"),
-        QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption))) {
-        tls_mode = QStringLiteral("tls-auth");
-    }
-
-    QStringList lines;
-    lines << tr("Remote: %1").arg(remote_host.isEmpty() ? tr("(not set)") : remote_host);
-    lines << tr("Port: %1").arg(remote_port.isEmpty() ? tr("(not set)") : remote_port);
-    lines << tr("Proto: %1").arg(proto.isEmpty() ? tr("(not set)") : proto);
-    lines << tr("Dev: %1").arg(dev.isEmpty() ? tr("(not set)") : dev);
-    lines << tr("Auth: %1").arg(auth.isEmpty() ? tr("(not set)") : auth);
-    lines << tr("TLS mode: %1").arg(tls_mode.isEmpty() ? tr("(not set)") : tls_mode);
-
-    QMessageBox::information(this, tr("OpenVPN Details"), lines.join("\n"));
-}
-
-void EditDialog::on_openvpnDetailsButton_clicked()
-{
-    showOpenVpnDetails();
-}
 
 QString EditDialog::getEditedProfileName() const
 {
@@ -410,11 +372,62 @@ void EditDialog::on_buttonBox_accepted()
     ss->set_vpnc_script_filename(ui->vpncScriptEdit->text());
 
     if (ss->get_protocol_name() == QLatin1String(OCG_PROTO_OPENVPN)) {
-        if (ss->get_openvpn_config().isEmpty()) {
-            QMessageBox::information(this, qApp->applicationName(),
-                tr("Please import the OpenVPN config using the Import button."));
-            return;
-        }
+        OpenVpnConfig cfg;
+        cfg.remote_host = ui->openvpnRemoteHostEdit->text();
+        cfg.remote_port = ui->openvpnRemotePortEdit->text();
+        cfg.remote_proto = ui->openvpnRemoteProtoEdit->text();
+        cfg.dev = ui->openvpnDevEdit->text();
+        cfg.cipher = ui->openvpnCipherEdit->text();
+        cfg.data_ciphers = ui->openvpnDataCiphersEdit->text();
+        cfg.data_ciphers_fallback = ui->openvpnDataCiphersFallbackEdit->text();
+        cfg.auth = ui->openvpnAuthEdit->text();
+        cfg.auth_user_pass = ui->openvpnAuthUserPassCheck->isChecked();
+        cfg.remote_cert_tls = ui->openvpnRemoteCertTlsEdit->text();
+        cfg.compress = ui->openvpnCompressEdit->text();
+        cfg.resolv_retry = ui->openvpnResolvRetryEdit->text();
+        cfg.nobind = ui->openvpnNoBindCheck->isChecked();
+        cfg.persist_tun = ui->openvpnPersistTunCheck->isChecked();
+        cfg.persist_key = ui->openvpnPersistKeyCheck->isChecked();
+        cfg.ncp_disable = ui->openvpnNcpDisableCheck->isChecked();
+        cfg.tls_client = ui->openvpnTlsClientCheck->isChecked();
+        cfg.client = ui->openvpnClientCheck->isChecked();
+        cfg.setenv_client_cert = ui->openvpnSetenvClientCertEdit->text();
+        cfg.key_direction = ui->openvpnKeyDirectionEdit->text();
+        cfg.ca = ui->openvpnCaEdit->toPlainText();
+        cfg.cert = ui->openvpnCertEdit->toPlainText();
+        cfg.key = ui->openvpnKeyEdit->toPlainText();
+        cfg.tls_auth = ui->openvpnTlsAuthEdit->toPlainText();
+        cfg.tls_crypt = ui->openvpnTlsCryptEdit->toPlainText();
+
+        ss->set_openvpn_remote_host(cfg.remote_host);
+        ss->set_openvpn_remote_port(cfg.remote_port);
+        ss->set_openvpn_remote_proto(cfg.remote_proto);
+        ss->set_openvpn_dev(cfg.dev);
+        ss->set_openvpn_cipher(cfg.cipher);
+        ss->set_openvpn_data_ciphers(cfg.data_ciphers);
+        ss->set_openvpn_data_ciphers_fallback(cfg.data_ciphers_fallback);
+        ss->set_openvpn_auth(cfg.auth);
+        ss->set_openvpn_auth_user_pass(cfg.auth_user_pass);
+        ss->set_openvpn_remote_cert_tls(cfg.remote_cert_tls);
+        ss->set_openvpn_compress(cfg.compress);
+        ss->set_openvpn_resolv_retry(cfg.resolv_retry);
+        ss->set_openvpn_nobind(cfg.nobind);
+        ss->set_openvpn_persist_tun(cfg.persist_tun);
+        ss->set_openvpn_persist_key(cfg.persist_key);
+        ss->set_openvpn_ncp_disable(cfg.ncp_disable);
+        ss->set_openvpn_tls_client(cfg.tls_client);
+        ss->set_openvpn_client(cfg.client);
+        ss->set_openvpn_setenv_client_cert(cfg.setenv_client_cert);
+        ss->set_openvpn_key_direction(cfg.key_direction);
+        ss->set_openvpn_ca(cfg.ca);
+        ss->set_openvpn_cert(cfg.cert);
+        ss->set_openvpn_key(cfg.key);
+        ss->set_openvpn_tls_auth(cfg.tls_auth);
+        ss->set_openvpn_tls_crypt(cfg.tls_crypt);
+
+        const QString updated = update_openvpn_config_text(ss->get_openvpn_config_text(), cfg);
+        ss->set_openvpn_config_text(updated);
+        ss->set_openvpn_config(QString());
         ss->set_server_gateway(QString());
     }
 

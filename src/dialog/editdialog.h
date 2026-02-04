@@ -63,13 +63,10 @@ private slots:
 
     void on_vpncScriptButton_clicked();
     void on_protocolComboBox_currentIndexChanged(int index);
-    void on_openvpnImportButton_clicked();
-    void on_openvpnDetailsButton_clicked();
 
 private:
     void load_win_certs();
     void updateGatewayUiForProtocol(const QString& protocol_name);
-    void showOpenVpnDetails();
 
     struct win_cert_st {
         QString label;

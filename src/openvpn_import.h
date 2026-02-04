@@ -21,4 +21,6 @@
 
 #include <QString>
 
-bool import_openvpn_config(const QString& file_path, QString& out_config, QString& err);
+#include "openvpn_config.h"
+
+bool import_openvpn_config(const QString& file_path, OpenVpnConfig& out_cfg, QString& out_text, QString& err);
