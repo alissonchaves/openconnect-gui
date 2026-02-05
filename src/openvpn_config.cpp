@@ -24,17 +24,28 @@ static bool is_comment_or_empty(const QString& line)
     return trimmed.isEmpty() || trimmed.startsWith(QLatin1Char('#')) || trimmed.startsWith(QLatin1Char(';'));
 }
 
-static QString read_block(QTextStream& in, const QString& end_tag)
+static QString normalize_domain_token(QString value)
 {
-    QStringList lines;
-    while (!in.atEnd()) {
-        const QString line = in.readLine();
-        if (line.trimmed() == end_tag) {
-            break;
+    value = value.trimmed();
+    value.remove(QLatin1Char('\''));
+    value.remove(QLatin1Char('"'));
+    return value;
+}
+
+static QStringList split_dns_search_domains(const QString& value)
+{
+    QString normalized = value;
+    normalized.replace(QLatin1Char(','), QLatin1Char(' '));
+    normalized.replace(QLatin1Char(';'), QLatin1Char(' '));
+    const QStringList parts = normalized.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+    QStringList out;
+    for (const QString& part : parts) {
+        const QString domain = normalize_domain_token(part);
+        if (!domain.isEmpty() && !out.contains(domain)) {
+            out << domain;
         }
-        lines << line;
     }
-    return lines.join(QLatin1String("\n"));
+    return out;
 }
 
 bool parse_openvpn_config_text(const QString& text, OpenVpnConfig& out, QString* error)
@@ -159,6 +170,16 @@ bool parse_openvpn_config_text(const QString& text, OpenVpnConfig& out, QString*
             out.key_direction = parts.at(1);
         } else if (key == QLatin1String("setenv") && parts.size() > 2 && parts.at(1) == QLatin1String("CLIENT_CERT")) {
             out.setenv_client_cert = parts.at(2);
+        } else if (key == QLatin1String("dhcp-option") && parts.size() > 2) {
+            const QString option = parts.at(1).toUpper();
+            if (option == QLatin1String("DOMAIN") || option == QLatin1String("DOMAIN-SEARCH")) {
+                const QStringList domains = split_dns_search_domains(parts.mid(2).join(QLatin1String(" ")));
+                for (const QString& domain : domains) {
+                    if (!out.dns_search_domains.contains(domain)) {
+                        out.dns_search_domains << domain;
+                    }
+                }
+            }
         }
     }
     Q_UNUSED(error);
@@ -242,6 +263,12 @@ QString build_openvpn_config_text(const OpenVpnConfig& cfg)
     }
     if (!cfg.setenv_client_cert.isEmpty()) {
         lines << (QLatin1String("setenv CLIENT_CERT ") + cfg.setenv_client_cert);
+    }
+    for (const QString& domain : cfg.dns_search_domains) {
+        const QString normalized_domain = normalize_domain_token(domain);
+        if (!normalized_domain.isEmpty()) {
+            lines << (QLatin1String("dhcp-option DOMAIN-SEARCH ") + normalized_domain);
+        }
     }
     if (!cfg.key_direction.isEmpty()) {
         lines << (QLatin1String("key-direction ") + cfg.key_direction);
@@ -357,7 +384,9 @@ QString update_openvpn_config_text(const QString& base, const OpenVpnConfig& cfg
             || lower == QLatin1String("nobind")
             || lower.startsWith(QLatin1String("compress"))
             || lower.startsWith(QLatin1String("key-direction "))
-            || lower.startsWith(QLatin1String("setenv client_cert "))) {
+            || lower.startsWith(QLatin1String("setenv client_cert "))
+            || lower.startsWith(QLatin1String("dhcp-option domain "))
+            || lower.startsWith(QLatin1String("dhcp-option domain-search "))) {
             continue;
         }
 

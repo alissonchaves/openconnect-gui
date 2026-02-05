@@ -43,13 +43,16 @@ OpenVpnInfo::OpenVpnInfo(StoredServer* ss, MainWindow* m)
     , proc(std::make_unique<QProcess>())
     , auth_file(nullptr)
     , config_file(nullptr)
+    , dns_script_file(nullptr)
     , stop_requested(false)
     , connected(false)
     , openvpn_ip()
     , openvpn_dns()
+    , openvpn_dns_search()
     , openvpn_iface()
     , openvpn_cipher()
     , openvpn_mgmt_dns()
+    , openvpn_mgmt_dns_search()
     , openvpn_mgmt_socket(nullptr)
     , openvpn_mgmt_buffer()
     , openvpn_mgmt_port(0)
@@ -60,6 +63,7 @@ OpenVpnInfo::OpenVpnInfo(StoredServer* ss, MainWindow* m)
     , openvpn_mgmt_timer()
 {
     proc->setProcessChannelMode(QProcess::MergedChannels);
+    openvpn_dns_search = ss->get_dns_search_domains().trimmed();
 }
 
 OpenVpnInfo::~OpenVpnInfo()
@@ -163,12 +167,126 @@ bool OpenVpnInfo::prepareConfigFile(QString& err)
     return true;
 }
 
+static bool prepare_openvpn_dns_script(std::unique_ptr<QTemporaryFile>& scriptFile, QString& err)
+{
+#ifdef Q_OS_MAC
+    scriptFile = std::make_unique<QTemporaryFile>(QStringLiteral("/tmp/openconnect-gui-ovpn-dns-XXXXXX"));
+    scriptFile->setAutoRemove(true);
+    if (!scriptFile->open()) {
+        err = QObject::tr("Failed to create OpenVPN DNS helper script");
+        return false;
+    }
+
+    QTextStream out(scriptFile.get());
+    out << "#!/bin/sh\n";
+    out << "set -eu\n";
+    out << "SERVICE_ID=\"openconnect-gui-${dev:-ovpn}\"\n";
+    out << "DNS_SERVERS=\"\"\n";
+    out << "SEARCH_DOMAINS=\"\"\n";
+    out << "append_unique() {\n";
+    out << "  list=\"$1\"; item=\"$2\"\n";
+    out << "  [ -z \"$item\" ] && { printf '%s' \"$list\"; return; }\n";
+    out << "  case \" $list \" in *\" $item \"*) printf '%s' \"$list\" ;; *) printf '%s %s' \"$list\" \"$item\" ;; esac\n";
+    out << "}\n";
+    out << "i=1\n";
+    out << "while :; do\n";
+    out << "  eval \"opt=\\${foreign_option_${i}:-}\"\n";
+    out << "  [ -z \"$opt\" ] && break\n";
+    out << "  case \"$opt\" in\n";
+    out << "    dhcp-option\\ DNS\\ *)\n";
+    out << "      value=\"${opt#dhcp-option DNS }\"\n";
+    out << "      DNS_SERVERS=\"$(append_unique \"$DNS_SERVERS\" \"$value\")\"\n";
+    out << "      ;;\n";
+    out << "    dhcp-option\\ DOMAIN\\ *)\n";
+    out << "      value=\"${opt#dhcp-option DOMAIN }\"\n";
+    out << "      SEARCH_DOMAINS=\"$(append_unique \"$SEARCH_DOMAINS\" \"$value\")\"\n";
+    out << "      ;;\n";
+    out << "    dhcp-option\\ DOMAIN-SEARCH\\ *)\n";
+    out << "      value=\"${opt#dhcp-option DOMAIN-SEARCH }\"\n";
+    out << "      for d in $(printf '%s' \"$value\" | tr ',;' '  '); do\n";
+    out << "        SEARCH_DOMAINS=\"$(append_unique \"$SEARCH_DOMAINS\" \"$d\")\"\n";
+    out << "      done\n";
+    out << "      ;;\n";
+    out << "  esac\n";
+    out << "  i=$((i+1))\n";
+    out << "done\n";
+    out << "DNS_SERVERS=\"$(printf '%s' \"$DNS_SERVERS\" | sed 's/^ *//;s/ *$//')\"\n";
+    out << "SEARCH_DOMAINS=\"$(printf '%s' \"$SEARCH_DOMAINS\" | sed 's/^ *//;s/ *$//')\"\n";
+    out << "apply_dns() {\n";
+    out << "  [ -z \"$DNS_SERVERS\" ] && exit 0\n";
+    out << "  /usr/sbin/scutil <<SCUTIL_EOF\n";
+    out << "d.init\n";
+    out << "d.add ServerAddresses * ${DNS_SERVERS}\n";
+    out << "d.add SearchDomains * ${SEARCH_DOMAINS}\n";
+    out << "d.add SupplementalMatchDomains * ${SEARCH_DOMAINS}\n";
+    out << "d.add InterfaceName ${dev:-}\n";
+    out << "set State:/Network/Service/${SERVICE_ID}/DNS\n";
+    out << "quit\n";
+    out << "SCUTIL_EOF\n";
+    out << "}\n";
+    out << "remove_dns() {\n";
+    out << "  /usr/sbin/scutil <<SCUTIL_EOF\n";
+    out << "remove State:/Network/Service/${SERVICE_ID}/DNS\n";
+    out << "quit\n";
+    out << "SCUTIL_EOF\n";
+    out << "}\n";
+    out << "case \"${script_type:-}\" in\n";
+    out << "  init|up|route-up|ipchange|restart)\n";
+    out << "    apply_dns\n";
+    out << "    ;;\n";
+    out << "  down|route-pre-down)\n";
+    out << "    remove_dns\n";
+    out << "    ;;\n";
+    out << "esac\n";
+
+    out.flush();
+    scriptFile->flush();
+    scriptFile->setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner
+        | QFileDevice::ReadGroup | QFileDevice::ReadOther | QFileDevice::ExeGroup | QFileDevice::ExeOther);
+    return true;
+#else
+    Q_UNUSED(scriptFile);
+    Q_UNUSED(err);
+    return true;
+#endif
+}
+
 static bool config_requires_auth(const QString& cfg)
 {
     const QRegularExpression auth_re(
         QStringLiteral(R"(^\s*auth-user-pass(\s+.*)?$)"),
         QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption);
     return auth_re.match(cfg).hasMatch();
+}
+
+static QString normalize_domain_token(QString value)
+{
+    value = value.trimmed();
+    value.remove(QLatin1Char('\''));
+    value.remove(QLatin1Char('"'));
+    return value;
+}
+
+static void append_unique_domains(QStringList& target, const QString& rawDomains)
+{
+    QString normalized = rawDomains;
+    normalized.replace(QLatin1Char(','), QLatin1Char(' '));
+    normalized.replace(QLatin1Char(';'), QLatin1Char(' '));
+    const QStringList parts = normalized.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+    for (const QString& part : parts) {
+        const QString domain = normalize_domain_token(part);
+        if (!domain.isEmpty() && !target.contains(domain)) {
+            target << domain;
+        }
+    }
+}
+
+static QStringList split_scutil_list(const QString& csvOrSpaces)
+{
+    QString normalized = csvOrSpaces;
+    normalized.replace(QLatin1Char(','), QLatin1Char(' '));
+    normalized.replace(QLatin1Char(';'), QLatin1Char(' '));
+    return normalized.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
 }
 
 int OpenVpnInfo::connect()
@@ -226,6 +344,10 @@ int OpenVpnInfo::connect()
         last_err = err;
         return -1;
     }
+    if (prepare_openvpn_dns_script(dns_script_file, err) == false) {
+        last_err = err;
+        return -1;
+    }
 
     QStringList args;
     if (config_file != nullptr) {
@@ -235,6 +357,15 @@ int OpenVpnInfo::connect()
         args << "--auth-user-pass" << auth_file->fileName();
         args << "--auth-nocache";
     }
+#ifdef Q_OS_MAC
+    if (dns_script_file != nullptr) {
+        args << "--script-security" << "2";
+        args << "--up" << dns_script_file->fileName();
+        args << "--down" << dns_script_file->fileName();
+        args << "--down-pre";
+        args << "--up-restart";
+    }
+#endif
     // Ensure PUSH_REPLY and management logs for DNS/byte counts.
     args << "--verb" << "4";
     {
@@ -321,6 +452,7 @@ void OpenVpnInfo::handleOpenVpnLine(const QString& line)
         QRegularExpression re(QStringLiteral(R"(dhcp-option\s+DNS\s+([^\s,]+))"));
         QRegularExpressionMatchIterator it = re.globalMatch(msg);
         bool dnsUpdated = false;
+        bool dnsSearchUpdated = false;
         while (it.hasNext()) {
             const QRegularExpressionMatch m = it.next();
             QString dns = m.captured(1).trimmed();
@@ -330,16 +462,32 @@ void OpenVpnInfo::handleOpenVpnLine(const QString& line)
                 dnsUpdated = true;
             }
         }
+        QRegularExpression domainRe(QStringLiteral(R"(dhcp-option\s+DOMAIN(?:-SEARCH)?\s+([^\s,]+))"), QRegularExpression::CaseInsensitiveOption);
+        QRegularExpressionMatchIterator domainIt = domainRe.globalMatch(msg);
+        while (domainIt.hasNext()) {
+            const QRegularExpressionMatch m = domainIt.next();
+            const QString domain = normalize_domain_token(m.captured(1));
+            if (!domain.isEmpty() && !openvpn_mgmt_dns_search.contains(domain)) {
+                openvpn_mgmt_dns_search << domain;
+                dnsSearchUpdated = true;
+            }
+        }
         if (dnsUpdated) {
             openvpn_dns = openvpn_mgmt_dns.join(QLatin1String(", "));
+        }
+        if (dnsSearchUpdated) {
+            openvpn_dns_search = openvpn_mgmt_dns_search.join(QLatin1String(", "));
+        }
+        if (dnsUpdated || dnsSearchUpdated) {
             if (connected) {
                 QString ip6;
                 QString cstp = QStringLiteral("OpenVPN");
                 QString dtls;
-                m->vpn_status_changed(STATUS_CONNECTED, openvpn_dns, openvpn_ip, ip6, cstp, dtls);
+                applyOpenVpnDnsToSystem();
+                m->vpn_status_changed(STATUS_CONNECTED, openvpn_dns, openvpn_dns_search, openvpn_ip, ip6, cstp, dtls);
             }
         }
-    } else if (line.contains(QLatin1String("dhcp-option DNS"))) {
+    } else if (line.contains(QLatin1String("dhcp-option DNS")) || line.contains(QLatin1String("dhcp-option DOMAIN"), Qt::CaseInsensitive)) {
         QString normalized = line;
         normalized.replace(QLatin1Char(','), QLatin1Char(' '));
         QRegularExpression re(QStringLiteral(R"(dhcp-option\s+DNS\s+([^\s,]+))"));
@@ -356,6 +504,19 @@ void OpenVpnInfo::handleOpenVpnLine(const QString& line)
         if (!dnsList.isEmpty()) {
             openvpn_dns = dnsList.join(QLatin1String(", "));
         }
+        QRegularExpression domainRe(QStringLiteral(R"(dhcp-option\s+DOMAIN(?:-SEARCH)?\s+([^\s,]+))"), QRegularExpression::CaseInsensitiveOption);
+        QRegularExpressionMatchIterator domainIt = domainRe.globalMatch(normalized);
+        QStringList domainList;
+        while (domainIt.hasNext()) {
+            const QRegularExpressionMatch m = domainIt.next();
+            const QString domain = normalize_domain_token(m.captured(1));
+            if (!domain.isEmpty() && !domainList.contains(domain)) {
+                domainList << domain;
+            }
+        }
+        if (!domainList.isEmpty()) {
+            openvpn_dns_search = domainList.join(QLatin1String(", "));
+        }
     }
 
     if (!connected && line.contains(QStringLiteral("Initialization Sequence Completed"), Qt::CaseInsensitive)) {
@@ -365,7 +526,9 @@ void OpenVpnInfo::handleOpenVpnLine(const QString& line)
         QString ip6;
         QString cstp = openvpn_cipher.isEmpty() ? QStringLiteral("OpenVPN") : openvpn_cipher;
         QString dtls;
-        m->vpn_status_changed(STATUS_CONNECTED, dns, ip, ip6, cstp, dtls);
+        QString dns_search = openvpn_dns_search;
+        applyOpenVpnDnsToSystem();
+        m->vpn_status_changed(STATUS_CONNECTED, dns, dns_search, ip, ip6, cstp, dtls);
         if (openvpn_dns.isEmpty()) {
             updateOpenVpnDnsFromSystem();
         }
@@ -474,15 +637,21 @@ void OpenVpnInfo::handleOpenVpnManagementLine(const QString& line)
             if (state == QLatin1String("CONNECTED")) {
                 connected = true;
                 QString dns = openvpn_dns;
+                QString dns_search = openvpn_dns_search;
                 if (!openvpn_mgmt_dns.isEmpty()) {
                     openvpn_dns = openvpn_mgmt_dns.join(QLatin1String(", "));
                     dns = openvpn_dns;
+                }
+                if (!openvpn_mgmt_dns_search.isEmpty()) {
+                    openvpn_dns_search = openvpn_mgmt_dns_search.join(QLatin1String(", "));
+                    dns_search = openvpn_dns_search;
                 }
                 QString ip = openvpn_ip;
                 QString ip6;
                 QString cstp = openvpn_cipher.isEmpty() ? QStringLiteral("OpenVPN") : openvpn_cipher;
                 QString dtls;
-                m->vpn_status_changed(STATUS_CONNECTED, dns, ip, ip6, cstp, dtls);
+                applyOpenVpnDnsToSystem();
+                m->vpn_status_changed(STATUS_CONNECTED, dns, dns_search, ip, ip6, cstp, dtls);
                 if (openvpn_dns.isEmpty()) {
                     updateOpenVpnDnsFromSystem();
                 }
@@ -558,6 +727,7 @@ void OpenVpnInfo::handleOpenVpnManagementLine(const QString& line)
         QRegularExpression re(QStringLiteral(R"(dhcp-option\s+DNS\s+([^\s,]+))"));
         QRegularExpressionMatchIterator it = re.globalMatch(msgNormalized);
         bool dnsUpdated = false;
+        bool dnsSearchUpdated = false;
         while (it.hasNext()) {
             const QRegularExpressionMatch m = it.next();
             const QString dns = m.captured(1);
@@ -566,13 +736,29 @@ void OpenVpnInfo::handleOpenVpnManagementLine(const QString& line)
                 dnsUpdated = true;
             }
         }
+        QRegularExpression domainRe(QStringLiteral(R"(dhcp-option\s+DOMAIN(?:-SEARCH)?\s+([^\s,]+))"), QRegularExpression::CaseInsensitiveOption);
+        QRegularExpressionMatchIterator domainIt = domainRe.globalMatch(msgNormalized);
+        while (domainIt.hasNext()) {
+            const QRegularExpressionMatch m = domainIt.next();
+            const QString domain = normalize_domain_token(m.captured(1));
+            if (!domain.isEmpty() && !openvpn_mgmt_dns_search.contains(domain)) {
+                openvpn_mgmt_dns_search << domain;
+                dnsSearchUpdated = true;
+            }
+        }
         if (dnsUpdated) {
             openvpn_dns = openvpn_mgmt_dns.join(QLatin1String(", "));
+        }
+        if (dnsSearchUpdated) {
+            openvpn_dns_search = openvpn_mgmt_dns_search.join(QLatin1String(", "));
+        }
+        if (dnsUpdated || dnsSearchUpdated) {
             if (connected) {
                 QString ip6;
                 QString cstp = openvpn_cipher.isEmpty() ? QStringLiteral("OpenVPN") : openvpn_cipher;
                 QString dtls;
-                m->vpn_status_changed(STATUS_CONNECTED, openvpn_dns, openvpn_ip, ip6, cstp, dtls);
+                applyOpenVpnDnsToSystem();
+                m->vpn_status_changed(STATUS_CONNECTED, openvpn_dns, openvpn_dns_search, openvpn_ip, ip6, cstp, dtls);
             }
         }
     }
@@ -593,14 +779,17 @@ void OpenVpnInfo::updateOpenVpnDnsFromSystem()
     const QStringList lines = output.split('\n');
     QString currentIface;
     QStringList currentDns;
+    QStringList currentSearchDomains;
     auto flush = [&]() -> bool {
         if (currentIface == openvpn_iface && !currentDns.isEmpty()) {
             openvpn_dns = currentDns.join(QLatin1String(", "));
+            openvpn_dns_search = currentSearchDomains.join(QLatin1String(", "));
             if (connected) {
                 QString ip6;
                 QString cstp = QStringLiteral("OpenVPN");
                 QString dtls;
-                m->vpn_status_changed(STATUS_CONNECTED, openvpn_dns, openvpn_ip, ip6, cstp, dtls);
+                applyOpenVpnDnsToSystem();
+                m->vpn_status_changed(STATUS_CONNECTED, openvpn_dns, openvpn_dns_search, openvpn_ip, ip6, cstp, dtls);
             }
             return true;
         }
@@ -615,6 +804,7 @@ void OpenVpnInfo::updateOpenVpnDnsFromSystem()
             }
             currentIface.clear();
             currentDns.clear();
+            currentSearchDomains.clear();
             continue;
         }
         if (line.startsWith(QLatin1String("nameserver["))) {
@@ -624,6 +814,13 @@ void OpenVpnInfo::updateOpenVpnDnsFromSystem()
                 if (!dns.isEmpty() && !currentDns.contains(dns)) {
                     currentDns << dns;
                 }
+            }
+            continue;
+        }
+        if (line.startsWith(QLatin1String("search domain["))) {
+            const int colon = line.indexOf(QLatin1Char(':'));
+            if (colon != -1) {
+                append_unique_domains(currentSearchDomains, line.mid(colon + 1).trimmed());
             }
             continue;
         }
@@ -643,6 +840,60 @@ void OpenVpnInfo::updateOpenVpnDnsFromSystem()
         }
     }
     flush();
+#endif
+}
+
+void OpenVpnInfo::applyOpenVpnDnsToSystem()
+{
+#ifdef Q_OS_MAC
+    if (openvpn_iface.isEmpty() || openvpn_dns.isEmpty()) {
+        return;
+    }
+    const QStringList dnsServers = split_scutil_list(openvpn_dns);
+    if (dnsServers.isEmpty()) {
+        return;
+    }
+    const QStringList searchDomains = split_scutil_list(openvpn_dns_search);
+    const QString serviceId = QStringLiteral("openconnect-gui-%1").arg(openvpn_iface);
+    QProcess scutil;
+    scutil.start(QStringLiteral("/usr/sbin/scutil"));
+    if (!scutil.waitForStarted(1000)) {
+        return;
+    }
+    QString script;
+    script += QLatin1String("d.init\n");
+    script += QLatin1String("d.add ServerAddresses * ") + dnsServers.join(QLatin1Char(' ')) + QLatin1Char('\n');
+    if (!searchDomains.isEmpty()) {
+        script += QLatin1String("d.add SearchDomains * ") + searchDomains.join(QLatin1Char(' ')) + QLatin1Char('\n');
+        script += QLatin1String("d.add SupplementalMatchDomains * ") + searchDomains.join(QLatin1Char(' ')) + QLatin1Char('\n');
+    }
+    script += QLatin1String("d.add InterfaceName ") + openvpn_iface + QLatin1Char('\n');
+    script += QLatin1String("set State:/Network/Service/") + serviceId + QLatin1String("/DNS\n");
+    script += QLatin1String("quit\n");
+    scutil.write(script.toUtf8());
+    scutil.closeWriteChannel();
+    scutil.waitForFinished(1000);
+#endif
+}
+
+void OpenVpnInfo::clearOpenVpnDnsOnSystem()
+{
+#ifdef Q_OS_MAC
+    if (openvpn_iface.isEmpty()) {
+        return;
+    }
+    const QString serviceId = QStringLiteral("openconnect-gui-%1").arg(openvpn_iface);
+    QProcess scutil;
+    scutil.start(QStringLiteral("/usr/sbin/scutil"));
+    if (!scutil.waitForStarted(1000)) {
+        return;
+    }
+    QString script;
+    script += QLatin1String("remove State:/Network/Service/") + serviceId + QLatin1String("/DNS\n");
+    script += QLatin1String("quit\n");
+    scutil.write(script.toUtf8());
+    scutil.closeWriteChannel();
+    scutil.waitForFinished(1000);
 #endif
 }
 
@@ -687,6 +938,7 @@ void OpenVpnInfo::mainloop()
         QFile::remove(openvpn_mgmt_pass_file);
         openvpn_mgmt_pass_file.clear();
     }
+    clearOpenVpnDnsOnSystem();
 
     if (output_buffer.trimmed().isEmpty() == false) {
         Logger::instance().addMessage(output_buffer.trimmed());

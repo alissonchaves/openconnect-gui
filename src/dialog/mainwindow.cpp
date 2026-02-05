@@ -473,9 +473,10 @@ void MainWindow::vpn_status_changed(int connected)
     emit vpn_status_changed_sig(connected);
 }
 
-void MainWindow::vpn_status_changed(int connected, QString& dns, QString& ip, QString& ip6, QString& cstp_cipher, QString& dtls_cipher)
+void MainWindow::vpn_status_changed(int connected, QString& dns, QString& dns_search, QString& ip, QString& ip6, QString& cstp_cipher, QString& dtls_cipher)
 {
     this->dns = dns;
+    this->dns_search = dns_search;
     this->ip = ip;
     this->ip6 = ip6;
     this->dtls_cipher = dtls_cipher;
@@ -579,6 +580,7 @@ void MainWindow::changeStatus(int val)
         this->ui->ipV4Label->setText(ip);
         this->ui->ipV6Label->setText(ip6);
         this->ui->dnsLabel->setText(dns);
+        this->ui->dnsSearchLabel->setText(dns_search);
         this->ui->cipherCSTPLabel->setText(cstp_cipher);
         this->ui->cipherDTLSLabel->setText(dtls_cipher);
 
@@ -638,6 +640,7 @@ void MainWindow::changeStatus(int val)
         ui->ipV4Label->clear();
         ui->ipV6Label->clear();
         ui->dnsLabel->clear();
+        ui->dnsSearchLabel->clear();
         ui->uploadLabel->clear();
         ui->downloadLabel->clear();
         ui->cipherCSTPLabel->clear();
@@ -697,7 +700,7 @@ static void main_loop(VpnInfo* vpninfo, MainWindow* m)
     bool reset_password = false;
     pass_was_empty = vpninfo->ss->get_password().isEmpty();
 
-    QString ip, ip6, dns, cstp, dtls;
+    QString ip, ip6, dns, dns_search, cstp, dtls;
 
     int ret = 0;
     bool retry = false;
@@ -737,9 +740,9 @@ static void main_loop(VpnInfo* vpninfo, MainWindow* m)
 
     } while (retry == true);
 
-    vpninfo->get_info(dns, ip, ip6);
+    vpninfo->get_info(dns, dns_search, ip, ip6);
     vpninfo->get_cipher_info(cstp, dtls);
-    m->vpn_status_changed(STATUS_CONNECTED, dns, ip, ip6, cstp, dtls);
+    m->vpn_status_changed(STATUS_CONNECTED, dns, dns_search, ip, ip6, cstp, dtls);
 
     vpninfo->ss->save();
     vpninfo->mainloop();

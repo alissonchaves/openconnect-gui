@@ -105,6 +105,8 @@ public:
 
     const QString& get_interface_name() const;
     void set_interface_name(const QString& interface_name);
+    const QString& get_dns_search_domains() const;
+    void set_dns_search_domains(const QString& dns_search_domains);
 
     const QString& get_vpnc_script_filename() const;
     void set_vpnc_script_filename(const QString& vpnc_script_filename);
@@ -204,6 +206,7 @@ private:
     Cert m_ca_cert;
     KeyPair m_client;
     QString m_interface_name;
+    QString m_dns_search_domains;
     QString m_vpnc_script_filename;
     QString m_openvpn_config;
     QString m_openvpn_config_text;

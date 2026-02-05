@@ -5,6 +5,7 @@
 #pragma once
 
 #include <QString>
+#include <QStringList>
 
 struct OpenVpnConfig {
     QString dev;
@@ -32,6 +33,7 @@ struct OpenVpnConfig {
     QString tls_crypt;
     QString key_direction;
     QString setenv_client_cert;
+    QStringList dns_search_domains;
 };
 
 bool parse_openvpn_config_file(const QString& path, OpenVpnConfig& out, QString* error);

@@ -28,6 +28,7 @@
 #include "server_storage.h"
 
 #include <QDir>
+#include <QFile>
 #include <QFileDevice>
 #include <QHash>
 #include <QTextStream>
@@ -404,7 +405,9 @@ static QStringList build_manual_route_lines(const QVector<StoredServer::RouteEnt
 static QByteArray write_vpnc_wrapper(VpnInfo* vpn,
                                      const QByteArray& base_script,
                                      int route_policy,
-                                     const QVector<StoredServer::RouteEntry>& routes)
+                                     const QVector<StoredServer::RouteEntry>& routes,
+                                     const QString& dns_search_file,
+                                     const QString& manual_dns_search)
 {
     QTemporaryFile* wrapper = vpn->create_vpnc_wrapper();
     if (!wrapper) {
@@ -413,10 +416,46 @@ static QByteArray write_vpnc_wrapper(VpnInfo* vpn,
 
     QTextStream out(wrapper);
 
+    QString escaped_dns_search_file = dns_search_file;
+    escaped_dns_search_file.replace(QLatin1Char('"'), QLatin1String("\\\""));
+    QString escaped_manual_dns_search = manual_dns_search;
+    escaped_manual_dns_search.replace(QLatin1Char('"'), QLatin1String("\\\""));
+
     out << "#!/bin/sh\n";
     out << "BASE_SCRIPT=\"" << QString::fromUtf8(base_script).replace('"', "\\\"") << "\"\n";
     out << "ROUTE_POLICY=" << route_policy << "\n";
+    out << "DNS_SEARCH_FILE=\"" << escaped_dns_search_file << "\"\n";
+    out << "MANUAL_DNS_SEARCH=\"" << escaped_manual_dns_search << "\"\n";
     out << "DEFAULT_GW=\"${INTERNAL_IP4_ADDRESS:-$VPNGATEWAY}\"\n";
+    out << "normalize_domains() {\n";
+    out << "  printf '%s' \"$1\" | tr ',;' '  ' | tr -s ' '\n";
+    out << "}\n";
+    out << "merge_domains() {\n";
+    out << "  combined=\"$(normalize_domains \"$1\") $(normalize_domains \"$2\")\"\n";
+    out << "  out=\"\"\n";
+    out << "  for d in $combined; do\n";
+    out << "    [ -z \"$d\" ] && continue\n";
+    out << "    case \" $out \" in *\" $d \"*) ;; *) out=\"$out $d\" ;; esac\n";
+    out << "  done\n";
+    out << "  printf '%s' \"$out\" | sed 's/^ *//;s/ *$//'\n";
+    out << "}\n";
+    out << "write_dns_search_file() {\n";
+    out << "  [ -z \"$DNS_SEARCH_FILE\" ] && return 0\n";
+    out << "  printf '%s\\n' \"$1\" > \"$DNS_SEARCH_FILE\" 2>/dev/null || true\n";
+    out << "}\n";
+    out << "SERVER_DNS_SEARCH=\"${INTERNAL_IP4_DNSSEARCH:-$INTERNAL_IP4_DNSDOMAIN}\"\n";
+    out << "if [ -z \"$SERVER_DNS_SEARCH\" ] && [ -n \"$CISCO_SPLIT_DNS\" ]; then\n";
+    out << "  SERVER_DNS_SEARCH=\"$CISCO_SPLIT_DNS\"\n";
+    out << "fi\n";
+    out << "MERGED_DNS_SEARCH=\"$(merge_domains \"$SERVER_DNS_SEARCH\" \"$MANUAL_DNS_SEARCH\")\"\n";
+    out << "if [ -n \"$MERGED_DNS_SEARCH\" ]; then\n";
+    out << "  export INTERNAL_IP4_DNSSEARCH=\"$MERGED_DNS_SEARCH\"\n";
+    out << "  first_domain=\"${MERGED_DNS_SEARCH%% *}\"\n";
+    out << "  if [ -n \"$first_domain\" ]; then\n";
+    out << "    export INTERNAL_IP4_DNSDOMAIN=\"$first_domain\"\n";
+    out << "  fi\n";
+    out << "fi\n";
+    out << "write_dns_search_file \"$MERGED_DNS_SEARCH\"\n";
     out << "manual_routes() {\n";
     out << "cat <<'EOF'\n";
     const QStringList manual_routes = build_manual_route_lines(routes);
@@ -482,6 +521,7 @@ static QByteArray write_vpnc_wrapper(VpnInfo* vpn,
     out << "    fi\n";
     out << "    ;;\n";
     out << "  disconnect)\n";
+    out << "    write_dns_search_file \"\"\n";
     out << "    if [ \"$ROUTE_POLICY\" -eq 1 ]; then\n";
     out << "      remove_def1_routes\n";
     out << "    elif [ \"$ROUTE_POLICY\" -eq 2 ]; then\n";
@@ -538,7 +578,9 @@ static void setup_tun_vfn(void* privdata)
     const QByteArray wrapperPath = write_vpnc_wrapper(vpn,
         vpncScriptFullPath,
         vpn->ss->get_route_policy(),
-        vpn->ss->get_route_entries());
+        vpn->ss->get_route_entries(),
+        vpn->getDnsSearchFilePath(),
+        vpn->ss->get_dns_search_domains());
 
     if (!wrapperPath.isEmpty()) {
         vpncScriptFullPath = wrapperPath;
@@ -608,6 +650,15 @@ VpnInfo::VpnInfo(QString name, StoredServer* ss, MainWindow* m)
     openconnect_set_protocol(vpninfo, ss->get_protocol_name().toLatin1().data());
 
     openconnect_set_setup_tun_handler(vpninfo, setup_tun_vfn);
+
+    dns_search_file = std::make_unique<QTemporaryFile>(QStringLiteral("/tmp/openconnect-gui-dns-search-XXXXXX"));
+    dns_search_file->setAutoRemove(true);
+    if (dns_search_file->open()) {
+        dns_search_file_path = dns_search_file->fileName();
+        dns_search_file->close();
+    } else {
+        dns_search_file.reset();
+    }
 }
 
 VpnInfo::~VpnInfo()
@@ -722,7 +773,22 @@ void VpnInfo::mainloop()
     }
 }
 
-void VpnInfo::get_info(QString& dns, QString& ip, QString& ip6)
+QString VpnInfo::readDnsSearchDomainsFromFile()
+{
+    if (dns_search_file_path.isEmpty()) {
+        return QString();
+    }
+
+    QFile file(dns_search_file_path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return QString();
+    }
+    const QString content = QString::fromUtf8(file.readAll()).trimmed();
+    file.close();
+    return content;
+}
+
+void VpnInfo::get_info(QString& dns, QString& dns_search, QString& ip, QString& ip6)
 {
     const struct oc_ip_info* info;
     int ret = openconnect_get_ip_info(this->vpninfo, &info, nullptr, nullptr);
@@ -752,6 +818,11 @@ void VpnInfo::get_info(QString& dns, QString& ip, QString& ip6)
             dns += info->dns[2];
         }
     }
+    dns_search_domains = readDnsSearchDomainsFromFile();
+    if (dns_search_domains.isEmpty()) {
+        dns_search_domains = ss->get_dns_search_domains().trimmed();
+    }
+    dns_search = dns_search_domains;
     return;
 }
 
@@ -770,6 +841,11 @@ void VpnInfo::get_cipher_info(QString& cstp, QString& dtls)
 SOCKET VpnInfo::get_cmd_fd() const
 {
     return cmd_fd;
+}
+
+const QString& VpnInfo::getDnsSearchFilePath() const
+{
+    return dns_search_file_path;
 }
 
 void VpnInfo::reset_vpn()

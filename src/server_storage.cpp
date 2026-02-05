@@ -208,6 +208,7 @@ int StoredServer::load(QString& name)
     m_openvpn_ncp_disable = settings.value("openvpn-ncp-disable", false).toBool();
     m_openvpn_tls_client = settings.value("openvpn-tls-client", false).toBool();
     m_openvpn_client = settings.value("openvpn-client", false).toBool();
+    m_dns_search_domains = settings.value("dns-search-domains").toString();
     m_route_policy = settings.value("route-policy", RoutePolicyServer).toInt();
     m_route_entries.clear();
     const QStringList route_list = settings.value("route-entries").toStringList();
@@ -245,6 +246,9 @@ int StoredServer::load(QString& name)
             if (m_openvpn_tls_crypt.isEmpty()) m_openvpn_tls_crypt = cfg.tls_crypt;
             if (m_openvpn_key_direction.isEmpty()) m_openvpn_key_direction = cfg.key_direction;
             if (m_openvpn_setenv_client_cert.isEmpty()) m_openvpn_setenv_client_cert = cfg.setenv_client_cert;
+            if (m_dns_search_domains.isEmpty() && !cfg.dns_search_domains.isEmpty()) {
+                m_dns_search_domains = cfg.dns_search_domains.join(QLatin1String(", "));
+            }
             if (!m_openvpn_auth_user_pass) m_openvpn_auth_user_pass = cfg.auth_user_pass;
             if (!m_openvpn_persist_tun) m_openvpn_persist_tun = cfg.persist_tun;
             if (!m_openvpn_persist_key) m_openvpn_persist_key = cfg.persist_key;
@@ -381,6 +385,7 @@ int StoredServer::save()
     settings.setValue("protocol-name", m_protocol_name);
 
     settings.setValue("interface-name", m_interface_name);
+    settings.setValue("dns-search-domains", m_dns_search_domains);
     settings.setValue("vpnc-script", m_vpnc_script_filename);
     if (m_log_level == -1)
         settings.remove("log-level");
@@ -687,6 +692,16 @@ const QString& StoredServer::get_interface_name() const
 void StoredServer::set_interface_name(const QString& interface_name)
 {
     this->m_interface_name = interface_name;
+}
+
+const QString& StoredServer::get_dns_search_domains() const
+{
+    return this->m_dns_search_domains;
+}
+
+void StoredServer::set_dns_search_domains(const QString& dns_search_domains)
+{
+    this->m_dns_search_domains = dns_search_domains;
 }
 
 const QString& StoredServer::get_vpnc_script_filename() const

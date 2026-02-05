@@ -354,7 +354,7 @@ Leave blank for default.</string>
        </item>
       </layout>
      </item>
-     <item row="12" column="1">
+     <item row="13" column="1">
       <widget class="QComboBox" name="loglevelBox">
        <property name="sizePolicy">
         <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
@@ -396,6 +396,25 @@ Leave blank for default.</string>
       </widget>
      </item>
      <item row="12" column="0">
+      <widget class="QLabel" name="dnsSearchDomainsLabel">
+       <property name="text">
+        <string>DNS search domains</string>
+       </property>
+      </widget>
+     </item>
+     <item row="12" column="1">
+      <widget class="QLineEdit" name="dnsSearchDomainsEdit">
+       <property name="toolTip">
+        <string>Comma or space separated DNS search domains.
+
+Examples: av.it.pt, corp.local</string>
+       </property>
+       <property name="placeholderText">
+        <string>(Optional) e.g. av.it.pt, corp.local</string>
+       </property>
+      </widget>
+     </item>
+     <item row="13" column="0">
       <widget class="QLabel" name="logLevelLabel">
        <property name="text">
         <string>Log Level</string>

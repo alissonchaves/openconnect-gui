@@ -52,6 +52,8 @@ private:
     void logOutputLines(const QString& chunk);
     void handleOpenVpnLine(const QString& line);
     void updateOpenVpnDnsFromSystem();
+    void applyOpenVpnDnsToSystem();
+    void clearOpenVpnDnsOnSystem();
     void connectOpenVpnManagement();
     void handleOpenVpnManagementData();
     void pollOpenVpnManagement();
@@ -64,14 +66,17 @@ private:
     std::unique_ptr<QProcess> proc;
     std::unique_ptr<QTemporaryFile> auth_file;
     std::unique_ptr<QTemporaryFile> config_file;
+    std::unique_ptr<QTemporaryFile> dns_script_file;
     std::atomic_bool stop_requested;
     QString output_buffer;
     bool connected;
     QString openvpn_ip;
     QString openvpn_dns;
+    QString openvpn_dns_search;
     QString openvpn_iface;
     QString openvpn_cipher;
     QStringList openvpn_mgmt_dns;
+    QStringList openvpn_mgmt_dns_search;
     std::unique_ptr<QTcpSocket> openvpn_mgmt_socket;
     QByteArray openvpn_mgmt_buffer;
     quint16 openvpn_mgmt_port = 0;

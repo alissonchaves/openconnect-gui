@@ -29,6 +29,7 @@
 #include <QFileInfo>
 #include <QListWidget>
 #include <QMessageBox>
+#include <QRegularExpression>
 
 #ifdef USE_SYSTEM_KEYS
 extern "C" {
@@ -85,6 +86,24 @@ static int loglevel_rtab[] = {
     PRG_DEBUG, // [3]
     PRG_TRACE  // [4]
 };
+
+static QStringList splitDnsSearchDomains(const QString& text)
+{
+    QString normalized = text;
+    normalized.replace(QLatin1Char(','), QLatin1Char(' '));
+    normalized.replace(QLatin1Char(';'), QLatin1Char(' '));
+    const QStringList parts = normalized.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+    QStringList out;
+    for (const QString& part : parts) {
+        QString domain = part.trimmed();
+        domain.remove(QLatin1Char('\''));
+        domain.remove(QLatin1Char('"'));
+        if (!domain.isEmpty() && !out.contains(domain)) {
+            out << domain;
+        }
+    }
+    return out;
+}
 
 void EditDialog::load_win_certs()
 {
@@ -199,6 +218,7 @@ EditDialog::EditDialog(QString server, QWidget* parent)
 
     ui->protocolComboBox->setCurrentIndex(model->findIndex(ss->get_protocol_name()));
     ui->interfaceNameEdit->setText(ss->get_interface_name());
+    ui->dnsSearchDomainsEdit->setText(ss->get_dns_search_domains());
     ui->vpncScriptEdit->setText(ss->get_vpnc_script_filename());
 
     ui->openvpnRemoteHostEdit->setText(ss->get_openvpn_remote_host());
@@ -466,6 +486,8 @@ void EditDialog::on_buttonBox_accepted()
 
     ss->set_protocol_name(ui->protocolComboBox->currentData(ROLE_PROTOCOL_NAME).toString());
     ss->set_interface_name(ui->interfaceNameEdit->text());
+    const QStringList dnsSearchDomains = splitDnsSearchDomains(ui->dnsSearchDomainsEdit->text());
+    ss->set_dns_search_domains(dnsSearchDomains.join(QLatin1String(", ")));
     ss->set_vpnc_script_filename(ui->vpncScriptEdit->text());
 
     if (ss->get_protocol_name() == QLatin1String(OCG_PROTO_OPENVPN)) {
@@ -495,6 +517,7 @@ void EditDialog::on_buttonBox_accepted()
         cfg.key = ui->openvpnKeyEdit->toPlainText();
         cfg.tls_auth = ui->openvpnTlsAuthEdit->toPlainText();
         cfg.tls_crypt = ui->openvpnTlsCryptEdit->toPlainText();
+        cfg.dns_search_domains = dnsSearchDomains;
 
         ss->set_openvpn_remote_host(cfg.remote_host);
         ss->set_openvpn_remote_port(cfg.remote_port);

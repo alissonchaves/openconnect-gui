@@ -70,6 +70,7 @@ public:
     void vpn_status_changed(int connected);
     void vpn_status_changed(int connected,
         QString& dns,
+        QString& dns_search,
         QString& ip,
         QString& ip6,
         QString& cstp_cipher,
@@ -137,6 +138,7 @@ private:
     QString current_protocol;
 
     QString dns;
+    QString dns_search;
     QString ip;
     QString ip6;
     QString cstp_cipher;
