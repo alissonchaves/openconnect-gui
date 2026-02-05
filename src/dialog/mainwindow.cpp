@@ -101,6 +101,7 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName)
 {
     ui->setupUi(this);
 
+#ifdef Q_OS_MACOS
     // Keep the Dock icon fixed to the "connected" icon regardless of VPN state.
     {
         QFileSelector selector;
@@ -109,6 +110,7 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName)
         setWindowIcon(dockIcon);
         qApp->setWindowIcon(dockIcon);
     }
+#endif
 
     connect(ui->viewLogButton, &QPushButton::clicked,
         this, &MainWindow::createLogDialog);
@@ -565,14 +567,18 @@ void MainWindow::blink_ui()
 void MainWindow::changeStatus(int val)
 {
     if (val == STATUS_CONNECTED) {
+#ifdef Q_OS_MACOS
         QApplication::beep();
+#endif
         if (m_trayIcon) {
             m_trayIcon->showMessage(QLatin1String("Connected"),
                 QLatin1String("You are connected to ") + ui->serverList->currentText(),
                 QSystemTrayIcon::Information,
                 10000);
         } else {
+#ifdef Q_OS_MACOS
             QApplication::beep();
+#endif
         }
 
         blink_timer->stop();
@@ -643,14 +649,18 @@ void MainWindow::changeStatus(int val)
             this, &MainWindow::on_disconnectClicked,
             Qt::QueuedConnection);
     } else if (val == STATUS_DISCONNECTED) {
+#ifdef Q_OS_MACOS
         QApplication::beep();
+#endif
         if (m_trayIcon) {
             m_trayIcon->showMessage(QLatin1String("Disconnected"),
                 QLatin1String("You were disconnected from the VPN"),
                 QSystemTrayIcon::Warning,
                 10000);
         } else {
+#ifdef Q_OS_MACOS
             QApplication::beep();
+#endif
         }
 
         blink_timer->stop();
