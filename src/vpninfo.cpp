@@ -31,6 +31,7 @@
 #include <QFile>
 #include <QFileDevice>
 #include <QHash>
+#include <QRegularExpression>
 #include <QTextStream>
 #include <QUrl>
 
@@ -41,6 +42,24 @@ static const char* OCG_PROTO_GLOBALPROTECT = "gp";
 static const char* OCG_PROTO_FORTINET = "fortinet";
 
 static int last_form_empty;
+
+static QString normalizeDnsSearchDomains(const QString& value)
+{
+    QString normalized = value;
+    normalized.replace(QLatin1Char(','), QLatin1Char(' '));
+    normalized.replace(QLatin1Char(';'), QLatin1Char(' '));
+    const QStringList parts = normalized.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+    QStringList out;
+    for (QString part : parts) {
+        part = part.trimmed();
+        part.remove(QLatin1Char('\''));
+        part.remove(QLatin1Char('"'));
+        if (!part.isEmpty() && !out.contains(part)) {
+            out << part;
+        }
+    }
+    return out.join(QLatin1String(" "));
+}
 
 static void stats_vfn(void* privdata, const struct oc_stats* stats)
 {
@@ -77,6 +96,21 @@ static void progress_vfn(void* privdata, int level, const char* fmt, ...)
     if (buf[len - 1] == '\n')
         buf[len - 1] = 0;
     Logger::instance().addMessage(buf);
+
+    VpnInfo* vpn = static_cast<VpnInfo*>(privdata);
+    const QString msg = QString::fromUtf8(buf);
+    static const QRegularExpression splitDnsRe(
+        QStringLiteral(R"(Got split-DNS domains\s+(.+)$)"),
+        QRegularExpression::CaseInsensitiveOption);
+    QRegularExpressionMatch m = splitDnsRe.match(msg);
+    if (m.hasMatch()) {
+        QString domains = m.captured(1).trimmed();
+        const int notePos = domains.indexOf(QLatin1String(" ("));
+        if (notePos > 0) {
+            domains = domains.left(notePos).trimmed();
+        }
+        vpn->setRuntimeDnsSearchDomains(normalizeDnsSearchDomains(domains));
+    }
 }
 
 static int process_auth_form(void* privdata, struct oc_auth_form* form)
@@ -443,11 +477,46 @@ static QByteArray write_vpnc_wrapper(VpnInfo* vpn,
     out << "  [ -z \"$DNS_SEARCH_FILE\" ] && return 0\n";
     out << "  printf '%s\\n' \"$1\" > \"$DNS_SEARCH_FILE\" 2>/dev/null || true\n";
     out << "}\n";
+    out << "read_dns_search_file() {\n";
+    out << "  [ -z \"$DNS_SEARCH_FILE\" ] && return 0\n";
+    out << "  [ -r \"$DNS_SEARCH_FILE\" ] || return 0\n";
+    out << "  cat \"$DNS_SEARCH_FILE\" 2>/dev/null | tr -d '\\r\\n'\n";
+    out << "}\n";
+    out << "apply_macos_split_dns() {\n";
+    out << "  [ \"$(uname -s 2>/dev/null)\" = \"Darwin\" ] || return 0\n";
+    out << "  [ -n \"$TUNDEV\" ] || return 0\n";
+    out << "  [ -n \"$INTERNAL_IP4_DNS\" ] || return 0\n";
+    out << "  [ -n \"$MERGED_DNS_SEARCH\" ] || return 0\n";
+    out << "  command -v scutil >/dev/null 2>&1 || return 0\n";
+    out << "  first_domain=\"${MERGED_DNS_SEARCH%% *}\"\n";
+    out << "  scutil >/dev/null 2>&1 <<-EOF\n";
+    out << "    open\n";
+    out << "    d.init\n";
+    out << "    d.add ServerAddresses * $INTERNAL_IP4_DNS\n";
+    out << "    d.add SearchDomains * $MERGED_DNS_SEARCH\n";
+    out << "    d.add SupplementalMatchDomains * $MERGED_DNS_SEARCH\n";
+    out << "    d.add DomainName $first_domain\n";
+    out << "    set State:/Network/Service/$TUNDEV/DNS\n";
+    out << "    close\n";
+    out << "EOF\n";
+    out << "}\n";
+    out << "clear_macos_split_dns() {\n";
+    out << "  [ \"$(uname -s 2>/dev/null)\" = \"Darwin\" ] || return 0\n";
+    out << "  [ -n \"$TUNDEV\" ] || return 0\n";
+    out << "  command -v scutil >/dev/null 2>&1 || return 0\n";
+    out << "  scutil >/dev/null 2>&1 <<-EOF\n";
+    out << "    open\n";
+    out << "    remove State:/Network/Service/$TUNDEV/DNS\n";
+    out << "    close\n";
+    out << "EOF\n";
+    out << "}\n";
     out << "SERVER_DNS_SEARCH=\"${INTERNAL_IP4_DNSSEARCH:-$INTERNAL_IP4_DNSDOMAIN}\"\n";
     out << "if [ -z \"$SERVER_DNS_SEARCH\" ] && [ -n \"$CISCO_SPLIT_DNS\" ]; then\n";
     out << "  SERVER_DNS_SEARCH=\"$CISCO_SPLIT_DNS\"\n";
     out << "fi\n";
-    out << "MERGED_DNS_SEARCH=\"$(merge_domains \"$SERVER_DNS_SEARCH\" \"$MANUAL_DNS_SEARCH\")\"\n";
+    out << "RUNTIME_DNS_SEARCH=\"$(read_dns_search_file)\"\n";
+    out << "MERGED_DNS_SEARCH=\"$(merge_domains \"$SERVER_DNS_SEARCH\" \"$RUNTIME_DNS_SEARCH\")\"\n";
+    out << "MERGED_DNS_SEARCH=\"$(merge_domains \"$MERGED_DNS_SEARCH\" \"$MANUAL_DNS_SEARCH\")\"\n";
     out << "if [ -n \"$MERGED_DNS_SEARCH\" ]; then\n";
     out << "  export INTERNAL_IP4_DNSSEARCH=\"$MERGED_DNS_SEARCH\"\n";
     out << "  first_domain=\"${MERGED_DNS_SEARCH%% *}\"\n";
@@ -514,6 +583,7 @@ static QByteArray write_vpnc_wrapper(VpnInfo* vpn,
     out << "\n";
     out << "case \"$reason\" in\n";
     out << "  connect|reconnect|attempt-reconnect)\n";
+    out << "    apply_macos_split_dns\n";
     out << "    if [ \"$ROUTE_POLICY\" -eq 1 ]; then\n";
     out << "      apply_def1_routes\n";
     out << "    elif [ \"$ROUTE_POLICY\" -eq 2 ]; then\n";
@@ -521,6 +591,7 @@ static QByteArray write_vpnc_wrapper(VpnInfo* vpn,
     out << "    fi\n";
     out << "    ;;\n";
     out << "  disconnect)\n";
+    out << "    clear_macos_split_dns\n";
     out << "    write_dns_search_file \"\"\n";
     out << "    if [ \"$ROUTE_POLICY\" -eq 1 ]; then\n";
     out << "      remove_def1_routes\n";
@@ -580,7 +651,9 @@ static void setup_tun_vfn(void* privdata)
         vpn->ss->get_route_policy(),
         vpn->ss->get_route_entries(),
         vpn->getDnsSearchFilePath(),
-        vpn->ss->get_dns_search_domains());
+        vpn->getRuntimeDnsSearchDomains().isEmpty()
+            ? vpn->ss->get_dns_search_domains()
+            : vpn->getRuntimeDnsSearchDomains());
 
     if (!wrapperPath.isEmpty()) {
         vpncScriptFullPath = wrapperPath;
@@ -846,6 +919,23 @@ SOCKET VpnInfo::get_cmd_fd() const
 const QString& VpnInfo::getDnsSearchFilePath() const
 {
     return dns_search_file_path;
+}
+
+const QString& VpnInfo::getRuntimeDnsSearchDomains() const
+{
+    return dns_search_domains;
+}
+
+void VpnInfo::setRuntimeDnsSearchDomains(const QString& domains)
+{
+    dns_search_domains = domains.trimmed();
+    if (!dns_search_file_path.isEmpty()) {
+        QFile file(dns_search_file_path);
+        if (file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
+            file.write(dns_search_domains.toUtf8());
+            file.close();
+        }
+    }
 }
 
 void VpnInfo::reset_vpn()

@@ -40,6 +40,8 @@ public:
     void get_cipher_info(QString& cstp, QString& dtls);
     SOCKET get_cmd_fd() const;
     const QString& getDnsSearchFilePath() const;
+    const QString& getRuntimeDnsSearchDomains() const;
+    void setRuntimeDnsSearchDomains(const QString& domains);
     void reset_vpn();
     bool get_minimize() const;
     bool is_username_form_option(struct oc_auth_form* form, struct oc_form_opt* opt);
