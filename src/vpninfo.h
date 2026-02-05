@@ -20,7 +20,9 @@
 #pragma once
 
 #include <QString>
+#include <QTemporaryFile>
 #include <QUrl>
+#include <memory>
 #include "common.h"
 
 class MainWindow;
@@ -54,7 +56,9 @@ public:
 
     void logVpncScriptOutput();
     QByteArray generateUniqueInterfaceName();
+    QTemporaryFile* create_vpnc_wrapper();
 
 private:
     SOCKET cmd_fd;
+    std::unique_ptr<QTemporaryFile> vpnc_wrapper;
 };

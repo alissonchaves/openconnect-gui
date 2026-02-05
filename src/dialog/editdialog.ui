@@ -860,8 +860,110 @@ Leave blank for default.</string>
          </item>
         </layout>
        </item>
-      </layout>
-     </widget>
+     </layout>
+    </widget>
+    <widget class="QWidget" name="routesTab">
+     <attribute name="title">
+      <string>Routes</string>
+     </attribute>
+     <layout class="QVBoxLayout" name="verticalLayout_routes">
+      <item>
+       <widget class="QGroupBox" name="routePolicyGroup">
+        <property name="title">
+         <string>Route policy</string>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout_routePolicy">
+         <item>
+          <widget class="QRadioButton" name="routePolicyServerRadio">
+           <property name="text">
+            <string>Use routes from server (default)</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QRadioButton" name="routePolicyVpnDefaultRadio">
+           <property name="text">
+            <string>Use VPN for all traffic (def1)</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QRadioButton" name="routePolicyManualRadio">
+           <property name="text">
+            <string>Only manual routes</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item>
+       <widget class="QGroupBox" name="manualRoutesGroup">
+        <property name="title">
+         <string>Manual routes</string>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout_manualRoutes">
+         <item>
+          <widget class="QTableWidget" name="manualRoutesTable">
+           <property name="columnCount">
+            <number>3</number>
+           </property>
+           <property name="rowCount">
+            <number>0</number>
+           </property>
+           <column>
+            <property name="text">
+             <string>Destination</string>
+            </property>
+           </column>
+           <column>
+            <property name="text">
+             <string>Netmask</string>
+            </property>
+           </column>
+           <column>
+            <property name="text">
+             <string>Gateway</string>
+            </property>
+           </column>
+          </widget>
+         </item>
+         <item>
+          <layout class="QHBoxLayout" name="manualRoutesButtonsLayout">
+           <item>
+            <widget class="QPushButton" name="routeAddButton">
+             <property name="text">
+              <string>Add route</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="routeRemoveButton">
+             <property name="text">
+              <string>Remove route</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <spacer name="manualRoutesSpacer">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
+         </item>
+        </layout>
+       </widget>
+      </item>
+     </layout>
+    </widget>
     </widget>
    </item>
    <item>

@@ -18,6 +18,7 @@
  */
 
 #include "openvpninfo.h"
+#include "openvpn_config.h"
 
 #include "common.h"
 #include "logger.h"
@@ -138,6 +139,14 @@ bool OpenVpnInfo::prepareConfigFile(QString& err)
         return true;
     }
 
+    QStringList route_entries;
+    for (const StoredServer::RouteEntry& route : ss->get_route_entries()) {
+        route_entries << (route.destination + QLatin1Char('|') + route.netmask + QLatin1Char('|') + route.gateway);
+    }
+    const QString config_text = apply_openvpn_route_policy(ss->get_openvpn_config_text(),
+        ss->get_route_policy(),
+        route_entries);
+
     config_file = std::make_unique<QTemporaryFile>(QStringLiteral("/tmp/openconnect-gui-ovpn-XXXXXX"));
     config_file->setAutoRemove(true);
     if (config_file->open() == false) {
@@ -147,7 +156,7 @@ bool OpenVpnInfo::prepareConfigFile(QString& err)
 
     config_file->setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ReadGroup | QFileDevice::ReadOther);
     QTextStream out(config_file.get());
-    out << ss->get_openvpn_config_text();
+    out << config_text;
     out.flush();
     config_file->flush();
     Logger::instance().addMessage(QObject::tr("OpenVPN config temp file: %1").arg(config_file->fileName()));

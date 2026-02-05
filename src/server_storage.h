@@ -20,6 +20,7 @@
 #pragma once
 
 #include "keypair.h"
+#include <QVector>
 
 class StoredServer {
 public:
@@ -107,6 +108,23 @@ public:
 
     const QString& get_vpnc_script_filename() const;
     void set_vpnc_script_filename(const QString& vpnc_script_filename);
+
+    enum RoutePolicy {
+        RoutePolicyServer = 0,
+        RoutePolicyVpnDefault = 1,
+        RoutePolicyManual = 2
+    };
+
+    struct RouteEntry {
+        QString destination;
+        QString netmask;
+        QString gateway;
+    };
+
+    int get_route_policy() const;
+    void set_route_policy(int policy);
+    const QVector<RouteEntry>& get_route_entries() const;
+    void set_route_entries(const QVector<RouteEntry>& entries);
 
     const QString& get_openvpn_config() const;
     void set_openvpn_config(const QString& openvpn_config);
@@ -214,5 +232,7 @@ private:
     bool m_openvpn_ncp_disable;
     bool m_openvpn_tls_client;
     bool m_openvpn_client;
+    int m_route_policy;
+    QVector<RouteEntry> m_route_entries;
     int m_log_level;
 };

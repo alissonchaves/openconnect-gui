@@ -38,3 +38,4 @@ bool parse_openvpn_config_file(const QString& path, OpenVpnConfig& out, QString*
 bool parse_openvpn_config_text(const QString& text, OpenVpnConfig& out, QString* error);
 QString build_openvpn_config_text(const OpenVpnConfig& cfg);
 QString update_openvpn_config_text(const QString& base, const OpenVpnConfig& cfg);
+QString apply_openvpn_route_policy(const QString& base, int policy, const QStringList& routes);

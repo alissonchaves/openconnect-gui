@@ -24,6 +24,7 @@
 #include "openvpn_config.h"
 #include "ui_editdialog.h"
 #include <QFileDialog>
+#include <QHeaderView>
 #include <QItemSelectionModel>
 #include <QFileInfo>
 #include <QListWidget>
@@ -226,6 +227,18 @@ EditDialog::EditDialog(QString server, QWidget* parent)
     ui->openvpnTlsAuthEdit->setPlainText(ss->get_openvpn_tls_auth());
     ui->openvpnTlsCryptEdit->setPlainText(ss->get_openvpn_tls_crypt());
 
+    ui->manualRoutesTable->horizontalHeader()->setStretchLastSection(true);
+    ui->manualRoutesTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    ui->manualRoutesTable->setSelectionMode(QAbstractItemView::SingleSelection);
+
+    connect(ui->routePolicyServerRadio, &QRadioButton::toggled, this, [this](bool) { update_route_ui(); });
+    connect(ui->routePolicyVpnDefaultRadio, &QRadioButton::toggled, this, [this](bool) { update_route_ui(); });
+    connect(ui->routePolicyManualRadio, &QRadioButton::toggled, this, [this](bool) { update_route_ui(); });
+    connect(ui->manualRoutesTable->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this]() { update_route_ui(); });
+
+    load_route_settings();
+    update_route_ui();
+
     updateGatewayUiForProtocol(ss->get_protocol_name());
 
     type = loglevel_tab(ss->get_log_level());
@@ -275,10 +288,94 @@ void EditDialog::updateGatewayUiForProtocol(const QString& protocol_name)
     }
 }
 
+void EditDialog::load_route_settings()
+{
+    const int policy = ss->get_route_policy();
+    if (policy == StoredServer::RoutePolicyVpnDefault) {
+        ui->routePolicyVpnDefaultRadio->setChecked(true);
+    } else if (policy == StoredServer::RoutePolicyManual) {
+        ui->routePolicyManualRadio->setChecked(true);
+    } else {
+        ui->routePolicyServerRadio->setChecked(true);
+    }
+
+    ui->manualRoutesTable->setRowCount(0);
+    const QVector<StoredServer::RouteEntry>& routes = ss->get_route_entries();
+    for (const StoredServer::RouteEntry& route : routes) {
+        const int row = ui->manualRoutesTable->rowCount();
+        ui->manualRoutesTable->insertRow(row);
+        ui->manualRoutesTable->setItem(row, 0, new QTableWidgetItem(route.destination));
+        ui->manualRoutesTable->setItem(row, 1, new QTableWidgetItem(route.netmask));
+        ui->manualRoutesTable->setItem(row, 2, new QTableWidgetItem(route.gateway));
+    }
+}
+
+void EditDialog::save_route_settings()
+{
+    int policy = StoredServer::RoutePolicyServer;
+    if (ui->routePolicyVpnDefaultRadio->isChecked()) {
+        policy = StoredServer::RoutePolicyVpnDefault;
+    } else if (ui->routePolicyManualRadio->isChecked()) {
+        policy = StoredServer::RoutePolicyManual;
+    }
+    ss->set_route_policy(policy);
+
+    QVector<StoredServer::RouteEntry> routes;
+    const int rows = ui->manualRoutesTable->rowCount();
+    for (int row = 0; row < rows; ++row) {
+        StoredServer::RouteEntry route;
+        QTableWidgetItem* destItem = ui->manualRoutesTable->item(row, 0);
+        QTableWidgetItem* maskItem = ui->manualRoutesTable->item(row, 1);
+        QTableWidgetItem* gwItem = ui->manualRoutesTable->item(row, 2);
+        route.destination = destItem ? destItem->text().trimmed() : QString();
+        route.netmask = maskItem ? maskItem->text().trimmed() : QString();
+        route.gateway = gwItem ? gwItem->text().trimmed() : QString();
+        if (!route.destination.isEmpty() || !route.netmask.isEmpty() || !route.gateway.isEmpty()) {
+            routes.push_back(route);
+        }
+    }
+    ss->set_route_entries(routes);
+}
+
+void EditDialog::update_route_ui()
+{
+    const bool manual = ui->routePolicyManualRadio->isChecked();
+    ui->manualRoutesTable->setEnabled(manual);
+    ui->routeAddButton->setEnabled(manual);
+    const bool hasSelection = ui->manualRoutesTable->selectionModel()
+        && ui->manualRoutesTable->selectionModel()->hasSelection();
+    ui->routeRemoveButton->setEnabled(manual && hasSelection);
+}
+
 void EditDialog::on_protocolComboBox_currentIndexChanged(int)
 {
     const QString protocol_name = ui->protocolComboBox->currentData(ROLE_PROTOCOL_NAME).toString();
     updateGatewayUiForProtocol(protocol_name);
+}
+
+void EditDialog::on_routeAddButton_clicked()
+{
+    const int row = ui->manualRoutesTable->rowCount();
+    ui->manualRoutesTable->insertRow(row);
+    ui->manualRoutesTable->setItem(row, 0, new QTableWidgetItem());
+    ui->manualRoutesTable->setItem(row, 1, new QTableWidgetItem());
+    ui->manualRoutesTable->setItem(row, 2, new QTableWidgetItem());
+    ui->manualRoutesTable->setCurrentCell(row, 0);
+    update_route_ui();
+}
+
+void EditDialog::on_routeRemoveButton_clicked()
+{
+    QModelIndexList selected = ui->manualRoutesTable->selectionModel()
+        ? ui->manualRoutesTable->selectionModel()->selectedRows()
+        : QModelIndexList();
+    if (selected.isEmpty()) {
+        return;
+    }
+    for (int i = selected.size() - 1; i >= 0; --i) {
+        ui->manualRoutesTable->removeRow(selected.at(i).row());
+    }
+    update_route_ui();
 }
 
 
@@ -437,6 +534,7 @@ void EditDialog::on_buttonBox_accepted()
     }
     ss->set_log_level(loglevel_rtab[type]);
 
+    save_route_settings();
     ss->save();
     this->accept();
 }

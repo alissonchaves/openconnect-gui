@@ -28,7 +28,9 @@
 #include "server_storage.h"
 
 #include <QDir>
+#include <QFileDevice>
 #include <QHash>
+#include <QTextStream>
 #include <QUrl>
 
 #include <cstdarg>
@@ -384,6 +386,116 @@ static QByteArray native_path(const QString& path) {
     return QDir::toNativeSeparators(path).toUtf8();
 }
 
+static QStringList build_manual_route_lines(const QVector<StoredServer::RouteEntry>& routes)
+{
+    QStringList lines;
+    for (const StoredServer::RouteEntry& route : routes) {
+        const QString dest = route.destination.trimmed();
+        const QString mask = route.netmask.trimmed();
+        const QString gw = route.gateway.trimmed();
+        if (dest.isEmpty() || mask.isEmpty()) {
+            continue;
+        }
+        lines << (dest + QLatin1Char('|') + mask + QLatin1Char('|') + gw);
+    }
+    return lines;
+}
+
+static QByteArray write_vpnc_wrapper(VpnInfo* vpn,
+                                     const QByteArray& base_script,
+                                     int route_policy,
+                                     const QVector<StoredServer::RouteEntry>& routes)
+{
+    QTemporaryFile* wrapper = vpn->create_vpnc_wrapper();
+    if (!wrapper) {
+        return QByteArray();
+    }
+
+    QTextStream out(wrapper);
+
+    out << "#!/bin/sh\n";
+    out << "BASE_SCRIPT=\"" << QString::fromUtf8(base_script).replace('"', "\\\"") << "\"\n";
+    out << "ROUTE_POLICY=" << route_policy << "\n";
+    out << "DEFAULT_GW=\"${INTERNAL_IP4_ADDRESS:-$VPNGATEWAY}\"\n";
+    out << "manual_routes() {\n";
+    out << "cat <<'EOF'\n";
+    const QStringList manual_routes = build_manual_route_lines(routes);
+    for (const QString& line : manual_routes) {
+        out << line << "\n";
+    }
+    out << "EOF\n";
+    out << "}\n";
+    out << "route_add() {\n";
+    out << "  dest=\"$1\"; mask=\"$2\"; gw=\"$3\";\n";
+    out << "  [ -z \"$dest\" ] && return 0\n";
+    out << "  [ -z \"$mask\" ] && return 0\n";
+    out << "  if [ -n \"$gw\" ]; then\n";
+    out << "    /sbin/route add -net \"$dest\" -netmask \"$mask\" \"$gw\" >/dev/null 2>&1 || true\n";
+    out << "  else\n";
+    out << "    /sbin/route add -net \"$dest\" -netmask \"$mask\" >/dev/null 2>&1 || true\n";
+    out << "  fi\n";
+    out << "}\n";
+    out << "route_del() {\n";
+    out << "  dest=\"$1\"; mask=\"$2\"; gw=\"$3\";\n";
+    out << "  [ -z \"$dest\" ] && return 0\n";
+    out << "  [ -z \"$mask\" ] && return 0\n";
+    out << "  if [ -n \"$gw\" ]; then\n";
+    out << "    /sbin/route delete -net \"$dest\" -netmask \"$mask\" \"$gw\" >/dev/null 2>&1 || true\n";
+    out << "  else\n";
+    out << "    /sbin/route delete -net \"$dest\" -netmask \"$mask\" >/dev/null 2>&1 || true\n";
+    out << "  fi\n";
+    out << "}\n";
+    out << "apply_manual_routes() {\n";
+    out << "  manual_routes | while IFS='|' read -r dest mask gw; do\n";
+    out << "    route_add \"$dest\" \"$mask\" \"$gw\"\n";
+    out << "  done\n";
+    out << "}\n";
+    out << "remove_manual_routes() {\n";
+    out << "  manual_routes | while IFS='|' read -r dest mask gw; do\n";
+    out << "    route_del \"$dest\" \"$mask\" \"$gw\"\n";
+    out << "  done\n";
+    out << "}\n";
+    out << "apply_def1_routes() {\n";
+    out << "  [ -z \"$DEFAULT_GW\" ] && return 0\n";
+    out << "  /sbin/route add -net 0.0.0.0 -netmask 128.0.0.0 \"$DEFAULT_GW\" >/dev/null 2>&1 || true\n";
+    out << "  /sbin/route add -net 128.0.0.0 -netmask 128.0.0.0 \"$DEFAULT_GW\" >/dev/null 2>&1 || true\n";
+    out << "}\n";
+    out << "remove_def1_routes() {\n";
+    out << "  [ -z \"$DEFAULT_GW\" ] && return 0\n";
+    out << "  /sbin/route delete -net 0.0.0.0 -netmask 128.0.0.0 \"$DEFAULT_GW\" >/dev/null 2>&1 || true\n";
+    out << "  /sbin/route delete -net 128.0.0.0 -netmask 128.0.0.0 \"$DEFAULT_GW\" >/dev/null 2>&1 || true\n";
+    out << "}\n";
+    out << "\n";
+    out << "if [ \"$ROUTE_POLICY\" -eq 2 ]; then\n";
+    out << "  export CISCO_SPLIT_INC=0\n";
+    out << "fi\n";
+    out << "\n";
+    out << "\"$BASE_SCRIPT\" \"$@\"\n";
+    out << "ret=$?\n";
+    out << "\n";
+    out << "case \"$reason\" in\n";
+    out << "  connect|reconnect|attempt-reconnect)\n";
+    out << "    if [ \"$ROUTE_POLICY\" -eq 1 ]; then\n";
+    out << "      apply_def1_routes\n";
+    out << "    elif [ \"$ROUTE_POLICY\" -eq 2 ]; then\n";
+    out << "      apply_manual_routes\n";
+    out << "    fi\n";
+    out << "    ;;\n";
+    out << "  disconnect)\n";
+    out << "    if [ \"$ROUTE_POLICY\" -eq 1 ]; then\n";
+    out << "      remove_def1_routes\n";
+    out << "    elif [ \"$ROUTE_POLICY\" -eq 2 ]; then\n";
+    out << "      remove_manual_routes\n";
+    out << "    fi\n";
+    out << "    ;;\n";
+    out << "esac\n";
+    out << "exit $ret\n";
+
+    out.flush();
+    wrapper->flush();
+    return native_path(wrapper->fileName());
+}
+
 static void setup_tun_vfn(void* privdata)
 {
     VpnInfo* vpn = static_cast<VpnInfo*>(privdata);
@@ -423,9 +535,18 @@ static void setup_tun_vfn(void* privdata)
     }
 #endif
 
+    const QByteArray wrapperPath = write_vpnc_wrapper(vpn,
+        vpncScriptFullPath,
+        vpn->ss->get_route_policy(),
+        vpn->ss->get_route_entries());
+
+    if (!wrapperPath.isEmpty()) {
+        vpncScriptFullPath = wrapperPath;
+    }
+
     int ret = openconnect_setup_tun_device(vpn->vpninfo,
-                                           vpncScriptFullPath.constData(),
-                                           interface_name_cstr);
+        vpncScriptFullPath.constData(),
+        interface_name_cstr);
     if (ret != 0) {
         vpn->last_err = QObject::tr("Error setting up the TUN device");
         //FIXME: ???        return ret;
@@ -711,6 +832,18 @@ void VpnInfo::logVpncScriptOutput()
     } else {
         Logger::instance().addMessage(QLatin1String("Could not open ") + QDir::toNativeSeparators(tfile) + ": " + file.errorString());
     }
+}
+
+QTemporaryFile* VpnInfo::create_vpnc_wrapper()
+{
+    vpnc_wrapper = std::make_unique<QTemporaryFile>(QStringLiteral("/tmp/openconnect-gui-vpnc-XXXXXX"));
+    vpnc_wrapper->setAutoRemove(true);
+    if (!vpnc_wrapper->open()) {
+        vpnc_wrapper.reset();
+        return nullptr;
+    }
+    vpnc_wrapper->setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+    return vpnc_wrapper.get();
 }
 
 QByteArray VpnInfo::generateUniqueInterfaceName()

@@ -373,3 +373,53 @@ QString update_openvpn_config_text(const QString& base, const OpenVpnConfig& cfg
     }
     return updated;
 }
+
+static QStringList build_openvpn_route_lines(const QStringList& routes)
+{
+    QStringList lines;
+    for (const QString& entry : routes) {
+        const QStringList parts = entry.split(QLatin1Char('|'));
+        const QString dest = parts.value(0).trimmed();
+        const QString mask = parts.value(1).trimmed();
+        const QString gw = parts.value(2).trimmed();
+        if (dest.isEmpty() || mask.isEmpty()) {
+            continue;
+        }
+        QString line = QLatin1String("route ") + dest + QLatin1Char(' ') + mask;
+        if (!gw.isEmpty()) {
+            line += QLatin1Char(' ') + gw;
+        }
+        lines << line;
+    }
+    return lines;
+}
+
+QString apply_openvpn_route_policy(const QString& base, int policy, const QStringList& routes)
+{
+    static constexpr int ROUTE_POLICY_SERVER = 0;
+    static constexpr int ROUTE_POLICY_VPN_DEFAULT = 1;
+    static constexpr int ROUTE_POLICY_MANUAL = 2;
+
+    if (policy == ROUTE_POLICY_SERVER) {
+        return base;
+    }
+
+    QStringList lines;
+    const QString trimmed = base.trimmed();
+    if (!trimmed.isEmpty()) {
+        lines << trimmed;
+    }
+
+    if (policy == ROUTE_POLICY_VPN_DEFAULT) {
+        lines << QLatin1String("redirect-gateway def1");
+    } else if (policy == ROUTE_POLICY_MANUAL) {
+        lines << QLatin1String("route-nopull");
+        const QStringList route_lines = build_openvpn_route_lines(routes);
+        for (const QString& line : route_lines) {
+            lines << line;
+        }
+    }
+
+    QString joined = lines.join(QLatin1String("\n")).trimmed();
+    return joined + QLatin1Char('\n');
+}

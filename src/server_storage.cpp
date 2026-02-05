@@ -43,6 +43,7 @@ StoredServer::StoredServer()
     , m_openvpn_ncp_disable(false)
     , m_openvpn_tls_client(false)
     , m_openvpn_client(false)
+    , m_route_policy(RoutePolicyServer)
     , m_log_level (-1)
 {
     set_window(nullptr);
@@ -207,6 +208,19 @@ int StoredServer::load(QString& name)
     m_openvpn_ncp_disable = settings.value("openvpn-ncp-disable", false).toBool();
     m_openvpn_tls_client = settings.value("openvpn-tls-client", false).toBool();
     m_openvpn_client = settings.value("openvpn-client", false).toBool();
+    m_route_policy = settings.value("route-policy", RoutePolicyServer).toInt();
+    m_route_entries.clear();
+    const QStringList route_list = settings.value("route-entries").toStringList();
+    for (const QString& entry : route_list) {
+        const QStringList parts = entry.split(QLatin1Char('|'));
+        RouteEntry route;
+        if (parts.size() > 0) route.destination = parts.at(0);
+        if (parts.size() > 1) route.netmask = parts.at(1);
+        if (parts.size() > 2) route.gateway = parts.at(2);
+        if (!route.destination.isEmpty() || !route.netmask.isEmpty() || !route.gateway.isEmpty()) {
+            m_route_entries.push_back(route);
+        }
+    }
 
     if (m_protocol_name == QLatin1String(OCG_PROTO_OPENVPN)
         && m_openvpn_config_text.isEmpty() == false
@@ -407,6 +421,13 @@ int StoredServer::save()
     settings.setValue("openvpn-ncp-disable", m_openvpn_ncp_disable);
     settings.setValue("openvpn-tls-client", m_openvpn_tls_client);
     settings.setValue("openvpn-client", m_openvpn_client);
+    settings.setValue("route-policy", m_route_policy);
+    QStringList route_list;
+    route_list.reserve(m_route_entries.size());
+    for (const RouteEntry& route : m_route_entries) {
+        route_list << (route.destination + QLatin1Char('|') + route.netmask + QLatin1Char('|') + route.gateway);
+    }
+    settings.setValue("route-entries", route_list);
 
     settings.endGroup();
     return 0;
@@ -676,6 +697,26 @@ const QString& StoredServer::get_vpnc_script_filename() const
 void StoredServer::set_vpnc_script_filename(const QString& vpnc_script_filename)
 {
     this->m_vpnc_script_filename = vpnc_script_filename;
+}
+
+int StoredServer::get_route_policy() const
+{
+    return m_route_policy;
+}
+
+void StoredServer::set_route_policy(int policy)
+{
+    m_route_policy = policy;
+}
+
+const QVector<StoredServer::RouteEntry>& StoredServer::get_route_entries() const
+{
+    return m_route_entries;
+}
+
+void StoredServer::set_route_entries(const QVector<RouteEntry>& entries)
+{
+    m_route_entries = entries;
 }
 
 int StoredServer::get_log_level()

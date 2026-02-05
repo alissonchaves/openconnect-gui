@@ -63,10 +63,15 @@ private slots:
 
     void on_vpncScriptButton_clicked();
     void on_protocolComboBox_currentIndexChanged(int index);
+    void on_routeAddButton_clicked();
+    void on_routeRemoveButton_clicked();
 
 private:
     void load_win_certs();
     void updateGatewayUiForProtocol(const QString& protocol_name);
+    void load_route_settings();
+    void save_route_settings();
+    void update_route_ui();
 
     struct win_cert_st {
         QString label;
