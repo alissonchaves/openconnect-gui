@@ -2,6 +2,12 @@ stages:
  - preliminaries  # signoff / static analysis
  - testing
 
+workflow:
+  rules:
+  - if: $CI_COMMIT_TAG
+  - if: $CI_COMMIT_BRANCH
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
 variables:
   BUILD_IMAGES_PROJECT: openconnect/build-images
   FEDORA_BUILD: openconnect-cli-fedora40
