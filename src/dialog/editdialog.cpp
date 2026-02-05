@@ -21,11 +21,15 @@
 #include "VpnProtocolModel.h"
 #include "common.h"
 #include "server_storage.h"
+#include "openvpn_config.h"
 #include "ui_editdialog.h"
 #include <QFileDialog>
+#include <QHeaderView>
 #include <QItemSelectionModel>
+#include <QFileInfo>
 #include <QListWidget>
 #include <QMessageBox>
+#include <QRegularExpression>
 
 #ifdef USE_SYSTEM_KEYS
 extern "C" {
@@ -82,6 +86,24 @@ static int loglevel_rtab[] = {
     PRG_DEBUG, // [3]
     PRG_TRACE  // [4]
 };
+
+static QStringList splitDnsSearchDomains(const QString& text)
+{
+    QString normalized = text;
+    normalized.replace(QLatin1Char(','), QLatin1Char(' '));
+    normalized.replace(QLatin1Char(';'), QLatin1Char(' '));
+    const QStringList parts = normalized.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+    QStringList out;
+    for (const QString& part : parts) {
+        QString domain = part.trimmed();
+        domain.remove(QLatin1Char('\''));
+        domain.remove(QLatin1Char('"'));
+        if (!domain.isEmpty() && !out.contains(domain)) {
+            out << domain;
+        }
+    }
+    return out;
+}
 
 void EditDialog::load_win_certs()
 {
@@ -141,6 +163,18 @@ EditDialog::EditDialog(QString server, QWidget* parent)
 {
     ui->setupUi(this);
 
+    connect(ui->settingsTabWidget, &QTabWidget::currentChanged, this, [this](int) {
+        QWidget* current = ui->settingsTabWidget->currentWidget();
+        if (current == nullptr) {
+            return;
+        }
+        const int h = current->sizeHint().height()
+            + ui->settingsTabWidget->tabBar()->sizeHint().height()
+            + 16;
+        ui->settingsTabWidget->setMinimumHeight(h);
+        ui->settingsTabWidget->setMaximumHeight(h);
+    });
+
 #ifdef _WIN32
     ui->interfaceNameEdit->setMaxLength(OC_IFNAME_MAX_LENGTH);
 #endif
@@ -184,7 +218,48 @@ EditDialog::EditDialog(QString server, QWidget* parent)
 
     ui->protocolComboBox->setCurrentIndex(model->findIndex(ss->get_protocol_name()));
     ui->interfaceNameEdit->setText(ss->get_interface_name());
+    ui->dnsSearchDomainsEdit->setText(ss->get_dns_search_domains());
     ui->vpncScriptEdit->setText(ss->get_vpnc_script_filename());
+
+    ui->openvpnRemoteHostEdit->setText(ss->get_openvpn_remote_host());
+    ui->openvpnRemotePortEdit->setText(ss->get_openvpn_remote_port());
+    ui->openvpnRemoteProtoEdit->setText(ss->get_openvpn_remote_proto());
+    ui->openvpnDevEdit->setText(ss->get_openvpn_dev());
+    ui->openvpnCipherEdit->setText(ss->get_openvpn_cipher());
+    ui->openvpnDataCiphersEdit->setText(ss->get_openvpn_data_ciphers());
+    ui->openvpnDataCiphersFallbackEdit->setText(ss->get_openvpn_data_ciphers_fallback());
+    ui->openvpnAuthEdit->setText(ss->get_openvpn_auth());
+    ui->openvpnAuthUserPassCheck->setChecked(ss->get_openvpn_auth_user_pass());
+    ui->openvpnRemoteCertTlsEdit->setText(ss->get_openvpn_remote_cert_tls());
+    ui->openvpnCompressEdit->setText(ss->get_openvpn_compress());
+    ui->openvpnResolvRetryEdit->setText(ss->get_openvpn_resolv_retry());
+    ui->openvpnNoBindCheck->setChecked(ss->get_openvpn_nobind());
+    ui->openvpnPersistTunCheck->setChecked(ss->get_openvpn_persist_tun());
+    ui->openvpnPersistKeyCheck->setChecked(ss->get_openvpn_persist_key());
+    ui->openvpnNcpDisableCheck->setChecked(ss->get_openvpn_ncp_disable());
+    ui->openvpnTlsClientCheck->setChecked(ss->get_openvpn_tls_client());
+    ui->openvpnClientCheck->setChecked(ss->get_openvpn_client());
+    ui->openvpnSetenvClientCertEdit->setText(ss->get_openvpn_setenv_client_cert());
+    ui->openvpnKeyDirectionEdit->setText(ss->get_openvpn_key_direction());
+    ui->openvpnCaEdit->setPlainText(ss->get_openvpn_ca());
+    ui->openvpnCertEdit->setPlainText(ss->get_openvpn_cert());
+    ui->openvpnKeyEdit->setPlainText(ss->get_openvpn_key());
+    ui->openvpnTlsAuthEdit->setPlainText(ss->get_openvpn_tls_auth());
+    ui->openvpnTlsCryptEdit->setPlainText(ss->get_openvpn_tls_crypt());
+
+    ui->manualRoutesTable->horizontalHeader()->setStretchLastSection(true);
+    ui->manualRoutesTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    ui->manualRoutesTable->setSelectionMode(QAbstractItemView::SingleSelection);
+
+    connect(ui->routePolicyServerRadio, &QRadioButton::toggled, this, [this](bool) { update_route_ui(); });
+    connect(ui->routePolicyVpnDefaultRadio, &QRadioButton::toggled, this, [this](bool) { update_route_ui(); });
+    connect(ui->routePolicyManualRadio, &QRadioButton::toggled, this, [this](bool) { update_route_ui(); });
+    connect(ui->manualRoutesTable->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this]() { update_route_ui(); });
+
+    load_route_settings();
+    update_route_ui();
+
+    updateGatewayUiForProtocol(ss->get_protocol_name());
 
     type = loglevel_tab(ss->get_log_level());
     if (type != -1) {
@@ -202,6 +277,129 @@ EditDialog::~EditDialog()
     delete ss;
 }
 
+void EditDialog::updateGatewayUiForProtocol(const QString& protocol_name)
+{
+    if (protocol_name == QLatin1String(OCG_PROTO_OPENVPN)) {
+        ui->gatewayLabel->setVisible(false);
+        ui->gatewayEdit->setVisible(false);
+        ui->caCertificateLabel->setVisible(false);
+        ui->caCertButton->setVisible(false);
+        ui->caCertEdit->setVisible(false);
+        ui->caCertClear->setVisible(false);
+        const int idx = ui->settingsTabWidget->indexOf(ui->openvpnTab);
+        if (idx >= 0) {
+            ui->settingsTabWidget->setTabEnabled(idx, true);
+            ui->settingsTabWidget->setCurrentIndex(idx);
+        }
+    } else {
+        ui->gatewayLabel->setText(tr("Gateway"));
+        ui->gatewayEdit->setPlaceholderText(tr("https://my_server[:443]/[usergroup]"));
+        ui->gatewayEdit->setToolTip(tr("Specify the hostname to connect to; a port may be specified after the host separated with a colon ':'"));
+        ui->gatewayLabel->setVisible(true);
+        ui->gatewayEdit->setVisible(true);
+        ui->caCertificateLabel->setVisible(true);
+        ui->caCertButton->setVisible(true);
+        ui->caCertEdit->setVisible(true);
+        ui->caCertClear->setVisible(true);
+        const int idx = ui->settingsTabWidget->indexOf(ui->openvpnTab);
+        if (idx >= 0) {
+            ui->settingsTabWidget->setTabEnabled(idx, false);
+        }
+    }
+}
+
+void EditDialog::load_route_settings()
+{
+    const int policy = ss->get_route_policy();
+    if (policy == StoredServer::RoutePolicyVpnDefault) {
+        ui->routePolicyVpnDefaultRadio->setChecked(true);
+    } else if (policy == StoredServer::RoutePolicyManual) {
+        ui->routePolicyManualRadio->setChecked(true);
+    } else {
+        ui->routePolicyServerRadio->setChecked(true);
+    }
+
+    ui->manualRoutesTable->setRowCount(0);
+    const QVector<StoredServer::RouteEntry>& routes = ss->get_route_entries();
+    for (const StoredServer::RouteEntry& route : routes) {
+        const int row = ui->manualRoutesTable->rowCount();
+        ui->manualRoutesTable->insertRow(row);
+        ui->manualRoutesTable->setItem(row, 0, new QTableWidgetItem(route.destination));
+        ui->manualRoutesTable->setItem(row, 1, new QTableWidgetItem(route.netmask));
+        ui->manualRoutesTable->setItem(row, 2, new QTableWidgetItem(route.gateway));
+    }
+}
+
+void EditDialog::save_route_settings()
+{
+    int policy = StoredServer::RoutePolicyServer;
+    if (ui->routePolicyVpnDefaultRadio->isChecked()) {
+        policy = StoredServer::RoutePolicyVpnDefault;
+    } else if (ui->routePolicyManualRadio->isChecked()) {
+        policy = StoredServer::RoutePolicyManual;
+    }
+    ss->set_route_policy(policy);
+
+    QVector<StoredServer::RouteEntry> routes;
+    const int rows = ui->manualRoutesTable->rowCount();
+    for (int row = 0; row < rows; ++row) {
+        StoredServer::RouteEntry route;
+        QTableWidgetItem* destItem = ui->manualRoutesTable->item(row, 0);
+        QTableWidgetItem* maskItem = ui->manualRoutesTable->item(row, 1);
+        QTableWidgetItem* gwItem = ui->manualRoutesTable->item(row, 2);
+        route.destination = destItem ? destItem->text().trimmed() : QString();
+        route.netmask = maskItem ? maskItem->text().trimmed() : QString();
+        route.gateway = gwItem ? gwItem->text().trimmed() : QString();
+        if (!route.destination.isEmpty() || !route.netmask.isEmpty() || !route.gateway.isEmpty()) {
+            routes.push_back(route);
+        }
+    }
+    ss->set_route_entries(routes);
+}
+
+void EditDialog::update_route_ui()
+{
+    const bool manual = ui->routePolicyManualRadio->isChecked();
+    ui->manualRoutesTable->setEnabled(manual);
+    ui->routeAddButton->setEnabled(manual);
+    const bool hasSelection = ui->manualRoutesTable->selectionModel()
+        && ui->manualRoutesTable->selectionModel()->hasSelection();
+    ui->routeRemoveButton->setEnabled(manual && hasSelection);
+}
+
+void EditDialog::on_protocolComboBox_currentIndexChanged(int)
+{
+    const QString protocol_name = ui->protocolComboBox->currentData(ROLE_PROTOCOL_NAME).toString();
+    updateGatewayUiForProtocol(protocol_name);
+}
+
+void EditDialog::on_routeAddButton_clicked()
+{
+    const int row = ui->manualRoutesTable->rowCount();
+    ui->manualRoutesTable->insertRow(row);
+    ui->manualRoutesTable->setItem(row, 0, new QTableWidgetItem());
+    ui->manualRoutesTable->setItem(row, 1, new QTableWidgetItem());
+    ui->manualRoutesTable->setItem(row, 2, new QTableWidgetItem());
+    ui->manualRoutesTable->setCurrentCell(row, 0);
+    update_route_ui();
+}
+
+void EditDialog::on_routeRemoveButton_clicked()
+{
+    QModelIndexList selected = ui->manualRoutesTable->selectionModel()
+        ? ui->manualRoutesTable->selectionModel()->selectedRows()
+        : QModelIndexList();
+    if (selected.isEmpty()) {
+        return;
+    }
+    for (int i = selected.size() - 1; i >= 0; --i) {
+        ui->manualRoutesTable->removeRow(selected.at(i).row());
+    }
+    update_route_ui();
+}
+
+
+
 QString EditDialog::getEditedProfileName() const
 {
     return ss->get_label();
@@ -209,7 +407,8 @@ QString EditDialog::getEditedProfileName() const
 
 void EditDialog::on_buttonBox_accepted()
 {
-    if (ui->gatewayEdit->text().isEmpty() == true) {
+    if (ui->gatewayEdit->text().isEmpty() == true
+        && ui->protocolComboBox->currentData(ROLE_PROTOCOL_NAME).toString() != QLatin1String(OCG_PROTO_OPENVPN)) {
         QMessageBox::information(this,
             qApp->applicationName(),
             tr("You need to specify a gateway. E.g. vpn.example.com:443"));
@@ -287,7 +486,70 @@ void EditDialog::on_buttonBox_accepted()
 
     ss->set_protocol_name(ui->protocolComboBox->currentData(ROLE_PROTOCOL_NAME).toString());
     ss->set_interface_name(ui->interfaceNameEdit->text());
+    const QStringList dnsSearchDomains = splitDnsSearchDomains(ui->dnsSearchDomainsEdit->text());
+    ss->set_dns_search_domains(dnsSearchDomains.join(QLatin1String(", ")));
     ss->set_vpnc_script_filename(ui->vpncScriptEdit->text());
+
+    if (ss->get_protocol_name() == QLatin1String(OCG_PROTO_OPENVPN)) {
+        OpenVpnConfig cfg;
+        cfg.remote_host = ui->openvpnRemoteHostEdit->text();
+        cfg.remote_port = ui->openvpnRemotePortEdit->text();
+        cfg.remote_proto = ui->openvpnRemoteProtoEdit->text();
+        cfg.dev = ui->openvpnDevEdit->text();
+        cfg.cipher = ui->openvpnCipherEdit->text();
+        cfg.data_ciphers = ui->openvpnDataCiphersEdit->text();
+        cfg.data_ciphers_fallback = ui->openvpnDataCiphersFallbackEdit->text();
+        cfg.auth = ui->openvpnAuthEdit->text();
+        cfg.auth_user_pass = ui->openvpnAuthUserPassCheck->isChecked();
+        cfg.remote_cert_tls = ui->openvpnRemoteCertTlsEdit->text();
+        cfg.compress = ui->openvpnCompressEdit->text();
+        cfg.resolv_retry = ui->openvpnResolvRetryEdit->text();
+        cfg.nobind = ui->openvpnNoBindCheck->isChecked();
+        cfg.persist_tun = ui->openvpnPersistTunCheck->isChecked();
+        cfg.persist_key = ui->openvpnPersistKeyCheck->isChecked();
+        cfg.ncp_disable = ui->openvpnNcpDisableCheck->isChecked();
+        cfg.tls_client = ui->openvpnTlsClientCheck->isChecked();
+        cfg.client = ui->openvpnClientCheck->isChecked();
+        cfg.setenv_client_cert = ui->openvpnSetenvClientCertEdit->text();
+        cfg.key_direction = ui->openvpnKeyDirectionEdit->text();
+        cfg.ca = ui->openvpnCaEdit->toPlainText();
+        cfg.cert = ui->openvpnCertEdit->toPlainText();
+        cfg.key = ui->openvpnKeyEdit->toPlainText();
+        cfg.tls_auth = ui->openvpnTlsAuthEdit->toPlainText();
+        cfg.tls_crypt = ui->openvpnTlsCryptEdit->toPlainText();
+        cfg.dns_search_domains = dnsSearchDomains;
+
+        ss->set_openvpn_remote_host(cfg.remote_host);
+        ss->set_openvpn_remote_port(cfg.remote_port);
+        ss->set_openvpn_remote_proto(cfg.remote_proto);
+        ss->set_openvpn_dev(cfg.dev);
+        ss->set_openvpn_cipher(cfg.cipher);
+        ss->set_openvpn_data_ciphers(cfg.data_ciphers);
+        ss->set_openvpn_data_ciphers_fallback(cfg.data_ciphers_fallback);
+        ss->set_openvpn_auth(cfg.auth);
+        ss->set_openvpn_auth_user_pass(cfg.auth_user_pass);
+        ss->set_openvpn_remote_cert_tls(cfg.remote_cert_tls);
+        ss->set_openvpn_compress(cfg.compress);
+        ss->set_openvpn_resolv_retry(cfg.resolv_retry);
+        ss->set_openvpn_nobind(cfg.nobind);
+        ss->set_openvpn_persist_tun(cfg.persist_tun);
+        ss->set_openvpn_persist_key(cfg.persist_key);
+        ss->set_openvpn_ncp_disable(cfg.ncp_disable);
+        ss->set_openvpn_tls_client(cfg.tls_client);
+        ss->set_openvpn_client(cfg.client);
+        ss->set_openvpn_setenv_client_cert(cfg.setenv_client_cert);
+        ss->set_openvpn_key_direction(cfg.key_direction);
+        ss->set_openvpn_ca(cfg.ca);
+        ss->set_openvpn_cert(cfg.cert);
+        ss->set_openvpn_key(cfg.key);
+        ss->set_openvpn_tls_auth(cfg.tls_auth);
+        ss->set_openvpn_tls_crypt(cfg.tls_crypt);
+
+        const QString updated = update_openvpn_config_text(ss->get_openvpn_config_text(), cfg);
+        ss->set_openvpn_config_text(updated);
+        ss->set_openvpn_config(QString());
+        ss->set_server_gateway(QString());
+    }
 
     type = ui->loglevelBox->currentIndex();
     if (type == -1) {
@@ -295,6 +557,7 @@ void EditDialog::on_buttonBox_accepted()
     }
     ss->set_log_level(loglevel_rtab[type]);
 
+    save_route_settings();
     ss->save();
     this->accept();
 }

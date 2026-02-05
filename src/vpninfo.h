@@ -20,7 +20,9 @@
 #pragma once
 
 #include <QString>
+#include <QTemporaryFile>
 #include <QUrl>
+#include <memory>
 #include "common.h"
 
 class MainWindow;
@@ -34,9 +36,12 @@ public:
     void setUrl(const QUrl& url);
     int connect();
     void mainloop();
-    void get_info(QString& dns, QString& ip, QString& ip6);
+    void get_info(QString& dns, QString& dns_search, QString& ip, QString& ip6);
     void get_cipher_info(QString& cstp, QString& dtls);
     SOCKET get_cmd_fd() const;
+    const QString& getDnsSearchFilePath() const;
+    const QString& getRuntimeDnsSearchDomains() const;
+    void setRuntimeDnsSearchDomains(const QString& domains);
     void reset_vpn();
     bool get_minimize() const;
     bool is_username_form_option(struct oc_auth_form* form, struct oc_form_opt* opt);
@@ -54,7 +59,13 @@ public:
 
     void logVpncScriptOutput();
     QByteArray generateUniqueInterfaceName();
+    QTemporaryFile* create_vpnc_wrapper();
 
 private:
+    QString readDnsSearchDomainsFromFile();
     SOCKET cmd_fd;
+    std::unique_ptr<QTemporaryFile> vpnc_wrapper;
+    std::unique_ptr<QTemporaryFile> dns_search_file;
+    QString dns_search_file_path;
+    QString dns_search_domains;
 };

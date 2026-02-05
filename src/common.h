@@ -76,6 +76,8 @@ extern "C" {
 
 #include <QString>
 
+constexpr const char* OCG_PROTO_OPENVPN = "openvpn";
+
 inline bool is_url(const QString& str)
 {
     if (str.startsWith("system:") || str.startsWith("pkcs11:") || str.startsWith("system:")) {

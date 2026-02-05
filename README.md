@@ -48,6 +48,14 @@ way openconnect gui works is
 - [Compilation](docs/dev.md)
 - [Development with QtCreator](docs/dev_QtCreator.md)
 
+## Install on macOS with Homebrew
+Use:
+
+```bash
+brew tap alissonchaves/openconnect-gui https://gitlab.com/alissonchaves/openconnect-gui.git
+brew install --cask openconnect-gui
+```
+
 ## Other
 - [Creating release package](docs/release.md)
 - [OpenConnect library compilation and dependencies](docs/openconnect.md)

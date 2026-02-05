@@ -76,8 +76,9 @@ bool relaunch_as_root()
         msgBox.setText(QObject::tr("Failed to create authorization reference."));
         return false;
     }
+    char *args[] = { NULL };
     status = AuthorizationExecuteWithPrivileges(authRef, appPath,
-        kAuthorizationFlagDefaults, NULL, NULL);
+        kAuthorizationFlagDefaults, args, NULL);
     AuthorizationFree(authRef, kAuthorizationFlagDestroyRights);
 
     if (status == errAuthorizationSuccess) {
@@ -206,7 +207,7 @@ int main(int argc, char* argv[])
     mainWindow.setWindowTitle(APP_NAME);
 
     QObject::connect(&app, &QtSingleApplication::messageReceived,
-        [&mainWindow](const QString& message) {
+        [](const QString& message) {
             Logger::instance().addMessage(message);
         });
     return app.exec();

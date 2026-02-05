@@ -28,7 +28,11 @@
 #include "server_storage.h"
 
 #include <QDir>
+#include <QFile>
+#include <QFileDevice>
 #include <QHash>
+#include <QRegularExpression>
+#include <QTextStream>
 #include <QUrl>
 
 #include <cstdarg>
@@ -38,6 +42,24 @@ static const char* OCG_PROTO_GLOBALPROTECT = "gp";
 static const char* OCG_PROTO_FORTINET = "fortinet";
 
 static int last_form_empty;
+
+static QString normalizeDnsSearchDomains(const QString& value)
+{
+    QString normalized = value;
+    normalized.replace(QLatin1Char(','), QLatin1Char(' '));
+    normalized.replace(QLatin1Char(';'), QLatin1Char(' '));
+    const QStringList parts = normalized.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+    QStringList out;
+    for (QString part : parts) {
+        part = part.trimmed();
+        part.remove(QLatin1Char('\''));
+        part.remove(QLatin1Char('"'));
+        if (!part.isEmpty() && !out.contains(part)) {
+            out << part;
+        }
+    }
+    return out.join(QLatin1String(" "));
+}
 
 static void stats_vfn(void* privdata, const struct oc_stats* stats)
 {
@@ -74,6 +96,21 @@ static void progress_vfn(void* privdata, int level, const char* fmt, ...)
     if (buf[len - 1] == '\n')
         buf[len - 1] = 0;
     Logger::instance().addMessage(buf);
+
+    VpnInfo* vpn = static_cast<VpnInfo*>(privdata);
+    const QString msg = QString::fromUtf8(buf);
+    static const QRegularExpression splitDnsRe(
+        QStringLiteral(R"(Got split-DNS domains\s+(.+)$)"),
+        QRegularExpression::CaseInsensitiveOption);
+    QRegularExpressionMatch m = splitDnsRe.match(msg);
+    if (m.hasMatch()) {
+        QString domains = m.captured(1).trimmed();
+        const int notePos = domains.indexOf(QLatin1String(" ("));
+        if (notePos > 0) {
+            domains = domains.left(notePos).trimmed();
+        }
+        vpn->setRuntimeDnsSearchDomains(normalizeDnsSearchDomains(domains));
+    }
 }
 
 static int process_auth_form(void* privdata, struct oc_auth_form* form)
@@ -384,12 +421,199 @@ static QByteArray native_path(const QString& path) {
     return QDir::toNativeSeparators(path).toUtf8();
 }
 
+static QStringList build_manual_route_lines(const QVector<StoredServer::RouteEntry>& routes)
+{
+    QStringList lines;
+    for (const StoredServer::RouteEntry& route : routes) {
+        const QString dest = route.destination.trimmed();
+        const QString mask = route.netmask.trimmed();
+        const QString gw = route.gateway.trimmed();
+        if (dest.isEmpty() || mask.isEmpty()) {
+            continue;
+        }
+        lines << (dest + QLatin1Char('|') + mask + QLatin1Char('|') + gw);
+    }
+    return lines;
+}
+
+static QByteArray write_vpnc_wrapper(VpnInfo* vpn,
+                                     const QByteArray& base_script,
+                                     int route_policy,
+                                     const QVector<StoredServer::RouteEntry>& routes,
+                                     const QString& dns_search_file,
+                                     const QString& manual_dns_search)
+{
+    QTemporaryFile* wrapper = vpn->create_vpnc_wrapper();
+    if (!wrapper) {
+        return QByteArray();
+    }
+
+    QTextStream out(wrapper);
+
+    QString escaped_dns_search_file = dns_search_file;
+    escaped_dns_search_file.replace(QLatin1Char('"'), QLatin1String("\\\""));
+    QString escaped_manual_dns_search = manual_dns_search;
+    escaped_manual_dns_search.replace(QLatin1Char('"'), QLatin1String("\\\""));
+
+    out << "#!/bin/sh\n";
+    out << "BASE_SCRIPT=\"" << QString::fromUtf8(base_script).replace('"', "\\\"") << "\"\n";
+    out << "ROUTE_POLICY=" << route_policy << "\n";
+    out << "DNS_SEARCH_FILE=\"" << escaped_dns_search_file << "\"\n";
+    out << "MANUAL_DNS_SEARCH=\"" << escaped_manual_dns_search << "\"\n";
+    out << "DEFAULT_GW=\"${INTERNAL_IP4_ADDRESS:-$VPNGATEWAY}\"\n";
+    out << "normalize_domains() {\n";
+    out << "  printf '%s' \"$1\" | tr ',;' '  ' | tr -s ' '\n";
+    out << "}\n";
+    out << "merge_domains() {\n";
+    out << "  combined=\"$(normalize_domains \"$1\") $(normalize_domains \"$2\")\"\n";
+    out << "  out=\"\"\n";
+    out << "  for d in $combined; do\n";
+    out << "    [ -z \"$d\" ] && continue\n";
+    out << "    case \" $out \" in *\" $d \"*) ;; *) out=\"$out $d\" ;; esac\n";
+    out << "  done\n";
+    out << "  printf '%s' \"$out\" | sed 's/^ *//;s/ *$//'\n";
+    out << "}\n";
+    out << "write_dns_search_file() {\n";
+    out << "  [ -z \"$DNS_SEARCH_FILE\" ] && return 0\n";
+    out << "  printf '%s\\n' \"$1\" > \"$DNS_SEARCH_FILE\" 2>/dev/null || true\n";
+    out << "}\n";
+    out << "read_dns_search_file() {\n";
+    out << "  [ -z \"$DNS_SEARCH_FILE\" ] && return 0\n";
+    out << "  [ -r \"$DNS_SEARCH_FILE\" ] || return 0\n";
+    out << "  cat \"$DNS_SEARCH_FILE\" 2>/dev/null | tr -d '\\r\\n'\n";
+    out << "}\n";
+    out << "apply_macos_split_dns() {\n";
+    out << "  [ \"$(uname -s 2>/dev/null)\" = \"Darwin\" ] || return 0\n";
+    out << "  [ -n \"$TUNDEV\" ] || return 0\n";
+    out << "  [ -n \"$INTERNAL_IP4_DNS\" ] || return 0\n";
+    out << "  [ -n \"$MERGED_DNS_SEARCH\" ] || return 0\n";
+    out << "  command -v scutil >/dev/null 2>&1 || return 0\n";
+    out << "  first_domain=\"${MERGED_DNS_SEARCH%% *}\"\n";
+    out << "  scutil >/dev/null 2>&1 <<-EOF\n";
+    out << "    open\n";
+    out << "    d.init\n";
+    out << "    d.add ServerAddresses * $INTERNAL_IP4_DNS\n";
+    out << "    d.add SearchDomains * $MERGED_DNS_SEARCH\n";
+    out << "    d.add SupplementalMatchDomains * $MERGED_DNS_SEARCH\n";
+    out << "    d.add DomainName $first_domain\n";
+    out << "    set State:/Network/Service/$TUNDEV/DNS\n";
+    out << "    close\n";
+    out << "EOF\n";
+    out << "}\n";
+    out << "clear_macos_split_dns() {\n";
+    out << "  [ \"$(uname -s 2>/dev/null)\" = \"Darwin\" ] || return 0\n";
+    out << "  [ -n \"$TUNDEV\" ] || return 0\n";
+    out << "  command -v scutil >/dev/null 2>&1 || return 0\n";
+    out << "  scutil >/dev/null 2>&1 <<-EOF\n";
+    out << "    open\n";
+    out << "    remove State:/Network/Service/$TUNDEV/DNS\n";
+    out << "    close\n";
+    out << "EOF\n";
+    out << "}\n";
+    out << "SERVER_DNS_SEARCH=\"${INTERNAL_IP4_DNSSEARCH:-$INTERNAL_IP4_DNSDOMAIN}\"\n";
+    out << "if [ -z \"$SERVER_DNS_SEARCH\" ] && [ -n \"$CISCO_SPLIT_DNS\" ]; then\n";
+    out << "  SERVER_DNS_SEARCH=\"$CISCO_SPLIT_DNS\"\n";
+    out << "fi\n";
+    out << "RUNTIME_DNS_SEARCH=\"$(read_dns_search_file)\"\n";
+    out << "MERGED_DNS_SEARCH=\"$(merge_domains \"$SERVER_DNS_SEARCH\" \"$RUNTIME_DNS_SEARCH\")\"\n";
+    out << "MERGED_DNS_SEARCH=\"$(merge_domains \"$MERGED_DNS_SEARCH\" \"$MANUAL_DNS_SEARCH\")\"\n";
+    out << "if [ -n \"$MERGED_DNS_SEARCH\" ]; then\n";
+    out << "  export INTERNAL_IP4_DNSSEARCH=\"$MERGED_DNS_SEARCH\"\n";
+    out << "  first_domain=\"${MERGED_DNS_SEARCH%% *}\"\n";
+    out << "  if [ -n \"$first_domain\" ]; then\n";
+    out << "    export INTERNAL_IP4_DNSDOMAIN=\"$first_domain\"\n";
+    out << "  fi\n";
+    out << "fi\n";
+    out << "write_dns_search_file \"$MERGED_DNS_SEARCH\"\n";
+    out << "manual_routes() {\n";
+    out << "cat <<'EOF'\n";
+    const QStringList manual_routes = build_manual_route_lines(routes);
+    for (const QString& line : manual_routes) {
+        out << line << "\n";
+    }
+    out << "EOF\n";
+    out << "}\n";
+    out << "route_add() {\n";
+    out << "  dest=\"$1\"; mask=\"$2\"; gw=\"$3\";\n";
+    out << "  [ -z \"$dest\" ] && return 0\n";
+    out << "  [ -z \"$mask\" ] && return 0\n";
+    out << "  if [ -n \"$gw\" ]; then\n";
+    out << "    /sbin/route add -net \"$dest\" -netmask \"$mask\" \"$gw\" >/dev/null 2>&1 || true\n";
+    out << "  else\n";
+    out << "    /sbin/route add -net \"$dest\" -netmask \"$mask\" >/dev/null 2>&1 || true\n";
+    out << "  fi\n";
+    out << "}\n";
+    out << "route_del() {\n";
+    out << "  dest=\"$1\"; mask=\"$2\"; gw=\"$3\";\n";
+    out << "  [ -z \"$dest\" ] && return 0\n";
+    out << "  [ -z \"$mask\" ] && return 0\n";
+    out << "  if [ -n \"$gw\" ]; then\n";
+    out << "    /sbin/route delete -net \"$dest\" -netmask \"$mask\" \"$gw\" >/dev/null 2>&1 || true\n";
+    out << "  else\n";
+    out << "    /sbin/route delete -net \"$dest\" -netmask \"$mask\" >/dev/null 2>&1 || true\n";
+    out << "  fi\n";
+    out << "}\n";
+    out << "apply_manual_routes() {\n";
+    out << "  manual_routes | while IFS='|' read -r dest mask gw; do\n";
+    out << "    route_add \"$dest\" \"$mask\" \"$gw\"\n";
+    out << "  done\n";
+    out << "}\n";
+    out << "remove_manual_routes() {\n";
+    out << "  manual_routes | while IFS='|' read -r dest mask gw; do\n";
+    out << "    route_del \"$dest\" \"$mask\" \"$gw\"\n";
+    out << "  done\n";
+    out << "}\n";
+    out << "apply_def1_routes() {\n";
+    out << "  [ -z \"$DEFAULT_GW\" ] && return 0\n";
+    out << "  /sbin/route add -net 0.0.0.0 -netmask 128.0.0.0 \"$DEFAULT_GW\" >/dev/null 2>&1 || true\n";
+    out << "  /sbin/route add -net 128.0.0.0 -netmask 128.0.0.0 \"$DEFAULT_GW\" >/dev/null 2>&1 || true\n";
+    out << "}\n";
+    out << "remove_def1_routes() {\n";
+    out << "  [ -z \"$DEFAULT_GW\" ] && return 0\n";
+    out << "  /sbin/route delete -net 0.0.0.0 -netmask 128.0.0.0 \"$DEFAULT_GW\" >/dev/null 2>&1 || true\n";
+    out << "  /sbin/route delete -net 128.0.0.0 -netmask 128.0.0.0 \"$DEFAULT_GW\" >/dev/null 2>&1 || true\n";
+    out << "}\n";
+    out << "\n";
+    out << "if [ \"$ROUTE_POLICY\" -eq 2 ]; then\n";
+    out << "  export CISCO_SPLIT_INC=0\n";
+    out << "fi\n";
+    out << "\n";
+    out << "\"$BASE_SCRIPT\" \"$@\"\n";
+    out << "ret=$?\n";
+    out << "\n";
+    out << "case \"$reason\" in\n";
+    out << "  connect|reconnect|attempt-reconnect)\n";
+    out << "    apply_macos_split_dns\n";
+    out << "    if [ \"$ROUTE_POLICY\" -eq 1 ]; then\n";
+    out << "      apply_def1_routes\n";
+    out << "    elif [ \"$ROUTE_POLICY\" -eq 2 ]; then\n";
+    out << "      apply_manual_routes\n";
+    out << "    fi\n";
+    out << "    ;;\n";
+    out << "  disconnect)\n";
+    out << "    clear_macos_split_dns\n";
+    out << "    write_dns_search_file \"\"\n";
+    out << "    if [ \"$ROUTE_POLICY\" -eq 1 ]; then\n";
+    out << "      remove_def1_routes\n";
+    out << "    elif [ \"$ROUTE_POLICY\" -eq 2 ]; then\n";
+    out << "      remove_manual_routes\n";
+    out << "    fi\n";
+    out << "    ;;\n";
+    out << "esac\n";
+    out << "exit $ret\n";
+
+    out.flush();
+    wrapper->flush();
+    return native_path(wrapper->fileName());
+}
+
 static void setup_tun_vfn(void* privdata)
 {
     VpnInfo* vpn = static_cast<VpnInfo*>(privdata);
 
     QByteArray vpncScriptFullPath;
     QByteArray interface_name;
+    const char* interface_name_cstr = nullptr;
 
     if (!vpn->ss->get_vpnc_script_filename().isEmpty())
         vpncScriptFullPath = native_path(vpn->ss->get_vpnc_script_filename());
@@ -399,8 +623,10 @@ static void setup_tun_vfn(void* privdata)
         vpncScriptFullPath = native_path(QCoreApplication::applicationDirPath()
                                          + "/" + QString(DEFAULT_VPNC_SCRIPT));
 
-    if (!vpn->ss->get_interface_name().isEmpty())
+    if (!vpn->ss->get_interface_name().isEmpty()) {
         interface_name = vpn->ss->get_interface_name().toUtf8();
+        interface_name_cstr = interface_name.constData();
+    }
 #ifdef _WIN32
 #if ! (OPENCONNECT_API_VERSION_MAJOR == 5 && OPENCONNECT_API_VERSION_MINOR == 9)
 #error "This probably has been fixed in openconnect in API version >= 5.9 and this workaround is not required anymore."
@@ -414,14 +640,28 @@ static void setup_tun_vfn(void* privdata)
         //So, use this "unique" interface name as a workaround to force wintun from openconnect.
         //See openconnect-gui#357 (comment 1758999655) and openconnect#699
         interface_name = vpn->generateUniqueInterfaceName();
+        interface_name_cstr = interface_name.constData();
 
         Logger::instance().addMessage(QObject::tr("Using generated interface name %1").arg(QString::fromUtf8(interface_name)));
     }
 #endif
 
+    const QByteArray wrapperPath = write_vpnc_wrapper(vpn,
+        vpncScriptFullPath,
+        vpn->ss->get_route_policy(),
+        vpn->ss->get_route_entries(),
+        vpn->getDnsSearchFilePath(),
+        vpn->getRuntimeDnsSearchDomains().isEmpty()
+            ? vpn->ss->get_dns_search_domains()
+            : vpn->getRuntimeDnsSearchDomains());
+
+    if (!wrapperPath.isEmpty()) {
+        vpncScriptFullPath = wrapperPath;
+    }
+
     int ret = openconnect_setup_tun_device(vpn->vpninfo,
-                                           vpncScriptFullPath.constData(),
-                                           interface_name.constData());
+        vpncScriptFullPath.constData(),
+        interface_name_cstr);
     if (ret != 0) {
         vpn->last_err = QObject::tr("Error setting up the TUN device");
         //FIXME: ???        return ret;
@@ -484,6 +724,15 @@ VpnInfo::VpnInfo(QString name, StoredServer* ss, MainWindow* m)
     openconnect_set_protocol(vpninfo, ss->get_protocol_name().toUtf8().data());
 
     openconnect_set_setup_tun_handler(vpninfo, setup_tun_vfn);
+
+    dns_search_file = std::make_unique<QTemporaryFile>(QStringLiteral("/tmp/openconnect-gui-dns-search-XXXXXX"));
+    dns_search_file->setAutoRemove(true);
+    if (dns_search_file->open()) {
+        dns_search_file_path = dns_search_file->fileName();
+        dns_search_file->close();
+    } else {
+        dns_search_file.reset();
+    }
 }
 
 VpnInfo::~VpnInfo()
@@ -540,7 +789,7 @@ int VpnInfo::connect()
 
 #ifdef Q_OS_WIN32
     const QString osName{ "win" };
-#elif defined Q_OS_OSX
+#elif defined Q_OS_MACOS
     const QString osName{ "mac-intel" };
 #elif defined Q_OS_LINUX
     const QString osName = QString("linux%1").arg(QSysInfo::buildCpuArchitecture() == "i386" ? "" : "-64").toStdString().c_str();
@@ -598,7 +847,22 @@ void VpnInfo::mainloop()
     }
 }
 
-void VpnInfo::get_info(QString& dns, QString& ip, QString& ip6)
+QString VpnInfo::readDnsSearchDomainsFromFile()
+{
+    if (dns_search_file_path.isEmpty()) {
+        return QString();
+    }
+
+    QFile file(dns_search_file_path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return QString();
+    }
+    const QString content = QString::fromUtf8(file.readAll()).trimmed();
+    file.close();
+    return content;
+}
+
+void VpnInfo::get_info(QString& dns, QString& dns_search, QString& ip, QString& ip6)
 {
     const struct oc_ip_info* info;
     int ret = openconnect_get_ip_info(this->vpninfo, &info, nullptr, nullptr);
@@ -628,6 +892,11 @@ void VpnInfo::get_info(QString& dns, QString& ip, QString& ip6)
             dns += info->dns[2];
         }
     }
+    dns_search_domains = readDnsSearchDomainsFromFile();
+    if (dns_search_domains.isEmpty()) {
+        dns_search_domains = ss->get_dns_search_domains().trimmed();
+    }
+    dns_search = dns_search_domains;
     return;
 }
 
@@ -646,6 +915,28 @@ void VpnInfo::get_cipher_info(QString& cstp, QString& dtls)
 SOCKET VpnInfo::get_cmd_fd() const
 {
     return cmd_fd;
+}
+
+const QString& VpnInfo::getDnsSearchFilePath() const
+{
+    return dns_search_file_path;
+}
+
+const QString& VpnInfo::getRuntimeDnsSearchDomains() const
+{
+    return dns_search_domains;
+}
+
+void VpnInfo::setRuntimeDnsSearchDomains(const QString& domains)
+{
+    dns_search_domains = domains.trimmed();
+    if (!dns_search_file_path.isEmpty()) {
+        QFile file(dns_search_file_path);
+        if (file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
+            file.write(dns_search_domains.toUtf8());
+            file.close();
+        }
+    }
 }
 
 void VpnInfo::reset_vpn()
@@ -708,6 +999,18 @@ void VpnInfo::logVpncScriptOutput()
     } else {
         Logger::instance().addMessage(QLatin1String("Could not open ") + QDir::toNativeSeparators(tfile) + ": " + file.errorString());
     }
+}
+
+QTemporaryFile* VpnInfo::create_vpnc_wrapper()
+{
+    vpnc_wrapper = std::make_unique<QTemporaryFile>(QStringLiteral("/tmp/openconnect-gui-vpnc-XXXXXX"));
+    vpnc_wrapper->setAutoRemove(true);
+    if (!vpnc_wrapper->open()) {
+        vpnc_wrapper.reset();
+        return nullptr;
+    }
+    vpnc_wrapper->setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+    return vpnc_wrapper.get();
 }
 
 QByteArray VpnInfo::generateUniqueInterfaceName()

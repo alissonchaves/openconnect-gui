@@ -26,6 +26,7 @@
 #include "server_storage.h"
 #include "timestamp.h"
 #include "ui_mainwindow.h"
+#include "openvpninfo.h"
 #include "vpninfo.h"
 #include "logger.h"
 
@@ -38,6 +39,7 @@ extern "C" {
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDialog>
+#include <QRegularExpression>
 #include <QEventTransition>
 #include <QFileSelector>
 #include <QFutureWatcher>
@@ -99,6 +101,17 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName)
 {
     ui->setupUi(this);
 
+#ifdef Q_OS_MACOS
+    // Keep the Dock icon fixed to the "connected" icon regardless of VPN state.
+    {
+        QFileSelector selector;
+        QIcon dockIcon(selector.select(QStringLiteral(":/images/network-connected.png")));
+        dockIcon.setIsMask(false);
+        setWindowIcon(dockIcon);
+        qApp->setWindowIcon(dockIcon);
+    }
+#endif
+
     connect(ui->viewLogButton, &QPushButton::clicked,
         this, &MainWindow::createLogDialog);
 
@@ -138,6 +151,10 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName)
     connect(this, &MainWindow::stats_changed_sig,
         this, &MainWindow::statsChanged,
         Qt::QueuedConnection);
+    connect(&futureWatcher, &QFutureWatcher<void>::finished, [this]() {
+        this->openvpninfo = nullptr;
+        this->current_protocol.clear();
+    });
 
     ui->iconLabel->setPixmap(OFF_ICON);
     QNetworkProxyFactory::setUseSystemConfiguration(true);
@@ -151,7 +168,7 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName)
 
         QFileSelector selector;
         QIcon icon(selector.select(QStringLiteral(":/images/network-disconnected.png")));
-        icon.setIsMask(true);
+        icon.setIsMask(false);
         m_trayIcon->setIcon(icon);
         m_trayIcon->show();
     } else {
@@ -379,7 +396,15 @@ MainWindow::~MainWindow()
     }
 
     if (this->futureWatcher.isRunning() == true) {
-        term_thread(this, &this->cmd_fd);
+        if (current_protocol == QLatin1String(OCG_PROTO_OPENVPN)) {
+            if (openvpninfo) {
+                openvpninfo->requestStop();
+            } else {
+                this->vpn_status_changed(STATUS_DISCONNECTED);
+            }
+        } else {
+            term_thread(this, &this->cmd_fd);
+        }
     }
     while (this->futureWatcher.isRunning() == true && counter > 0) {
         ms_sleep(200);
@@ -459,9 +484,10 @@ void MainWindow::vpn_status_changed(int connected)
     emit vpn_status_changed_sig(connected);
 }
 
-void MainWindow::vpn_status_changed(int connected, QString& dns, QString& ip, QString& ip6, QString& cstp_cipher, QString& dtls_cipher)
+void MainWindow::vpn_status_changed(int connected, QString& dns, QString& dns_search, QString& ip, QString& ip6, QString& cstp_cipher, QString& dtls_cipher)
 {
     this->dns = dns;
+    this->dns_search = dns_search;
     this->ip = ip;
     this->ip6 = ip6;
     this->dtls_cipher = dtls_cipher;
@@ -541,6 +567,19 @@ void MainWindow::blink_ui()
 void MainWindow::changeStatus(int val)
 {
     if (val == STATUS_CONNECTED) {
+#ifdef Q_OS_MACOS
+        QApplication::beep();
+#endif
+        if (m_trayIcon) {
+            m_trayIcon->showMessage(QLatin1String("Connected"),
+                QLatin1String("You are connected to ") + ui->serverList->currentText(),
+                QSystemTrayIcon::Information,
+                10000);
+        } else {
+#ifdef Q_OS_MACOS
+            QApplication::beep();
+#endif
+        }
 
         blink_timer->stop();
 
@@ -558,13 +597,14 @@ void MainWindow::changeStatus(int val)
         QFileSelector selector;
         if (m_trayIcon) {
             QIcon icon(selector.select(QStringLiteral(":/images/network-connected.png")));
-            icon.setIsMask(true);
+            icon.setIsMask(false);
             m_trayIcon->setIcon(icon);
         }
 
         this->ui->ipV4Label->setText(ip);
         this->ui->ipV6Label->setText(ip6);
         this->ui->dnsLabel->setText(dns);
+        this->ui->dnsSearchLabel->setText(dns_search);
         this->ui->cipherCSTPLabel->setText(cstp_cipher);
         this->ui->cipherDTLSLabel->setText(dtls_cipher);
 
@@ -573,9 +613,6 @@ void MainWindow::changeStatus(int val)
         if (this->minimize_on_connect) {
             if (m_trayIcon) {
                 hide();
-                m_trayIcon->showMessage(QLatin1String("Connected"), QLatin1String("You are connected to ") + ui->serverList->currentText(),
-                    QSystemTrayIcon::Information,
-                    10000);
             } else {
                 this->setWindowState(Qt::WindowMinimized);
             }
@@ -589,7 +626,7 @@ void MainWindow::changeStatus(int val)
         if (m_trayIcon) {
             QFileSelector selector;
             QIcon icon(selector.select(QStringLiteral(":/images/network-disconnected.png")));
-            icon.setIsMask(true);
+            icon.setIsMask(false);
             m_trayIcon->setIcon(icon);
             m_trayIcon->setToolTip(QLatin1String("Connecting to ") + ui->serverList->currentText());
         }
@@ -612,6 +649,20 @@ void MainWindow::changeStatus(int val)
             this, &MainWindow::on_disconnectClicked,
             Qt::QueuedConnection);
     } else if (val == STATUS_DISCONNECTED) {
+#ifdef Q_OS_MACOS
+        QApplication::beep();
+#endif
+        if (m_trayIcon) {
+            m_trayIcon->showMessage(QLatin1String("Disconnected"),
+                QLatin1String("You were disconnected from the VPN"),
+                QSystemTrayIcon::Warning,
+                10000);
+        } else {
+#ifdef Q_OS_MACOS
+            QApplication::beep();
+#endif
+        }
+
         blink_timer->stop();
         if (this->timer->isActive()) {
             timer->stop();
@@ -621,6 +672,7 @@ void MainWindow::changeStatus(int val)
         ui->ipV4Label->clear();
         ui->ipV6Label->clear();
         ui->dnsLabel->clear();
+        ui->dnsSearchLabel->clear();
         ui->uploadLabel->clear();
         ui->downloadLabel->clear();
         ui->cipherCSTPLabel->clear();
@@ -642,13 +694,8 @@ void MainWindow::changeStatus(int val)
         if (m_trayIcon) {
             QFileSelector selector;
             QIcon icon(selector.select(QStringLiteral(":/images/network-disconnected.png")));
-            icon.setIsMask(true);
+            icon.setIsMask(false);
             m_trayIcon->setIcon(icon);
-
-            if (this->isHidden() == true)
-                m_trayIcon->showMessage(QLatin1String("Disconnected"), QLatin1String("You were disconnected from the VPN"),
-                    QSystemTrayIcon::Warning,
-                    10000);
 
             m_trayIcon->setToolTip(QLatin1String("Disconnected"));
         }
@@ -680,7 +727,7 @@ static void main_loop(VpnInfo* vpninfo, MainWindow* m)
     bool reset_password = false;
     pass_was_empty = vpninfo->ss->get_password().isEmpty();
 
-    QString ip, ip6, dns, cstp, dtls;
+    QString ip, ip6, dns, dns_search, cstp, dtls;
 
     int ret = 0;
     bool retry = false;
@@ -720,9 +767,9 @@ static void main_loop(VpnInfo* vpninfo, MainWindow* m)
 
     } while (retry == true);
 
-    vpninfo->get_info(dns, ip, ip6);
+    vpninfo->get_info(dns, dns_search, ip, ip6);
     vpninfo->get_cipher_info(cstp, dtls);
-    m->vpn_status_changed(STATUS_CONNECTED, dns, ip, ip6, cstp, dtls);
+    m->vpn_status_changed(STATUS_CONNECTED, dns, dns_search, ip, ip6, cstp, dtls);
 
     vpninfo->ss->save();
     vpninfo->mainloop();
@@ -733,18 +780,48 @@ fail: // LCA: drop this 'goto' and optimize values...
     delete vpninfo;
 }
 
+static void openvpn_main_loop(OpenVpnInfo* ovpninfo, MainWindow* m)
+{
+    m->vpn_status_changed(STATUS_CONNECTING);
+
+    const int ret = ovpninfo->connect();
+    if (ret != 0) {
+        Logger::instance().addMessage(QObject::tr("OpenVPN connection failed: %1").arg(ovpninfo->last_err));
+        m->vpn_status_changed(STATUS_DISCONNECTED);
+        delete ovpninfo;
+        return;
+    }
+
+    ovpninfo->saveProfile();
+    ovpninfo->mainloop();
+
+    m->vpn_status_changed(STATUS_DISCONNECTED);
+    delete ovpninfo;
+}
+
 void MainWindow::on_disconnectClicked()
 {
     if (this->timer->isActive()) {
         this->timer->stop();
     }
     Logger::instance().addMessage(QObject::tr("Disconnecting..."));
+    if (current_protocol == QLatin1String(OCG_PROTO_OPENVPN)) {
+        this->vpn_status_changed(STATUS_DISCONNECTING);
+        if (openvpninfo) {
+            openvpninfo->requestStop();
+        } else {
+            this->vpn_status_changed(STATUS_DISCONNECTED);
+        }
+        return;
+    }
+
     term_thread(this, &this->cmd_fd);
 }
 
 void MainWindow::on_connectClicked()
 {
     VpnInfo* vpninfo = nullptr;
+    OpenVpnInfo* ovpninfo = nullptr;
     StoredServer* ss = nullptr;
     QFuture<void> future;
     QString name, url;
@@ -818,6 +895,28 @@ void MainWindow::on_connectClicked()
         } else {
             turl.setUrl("https://" + ss->get_server_gateway());
         }
+    }
+
+    this->current_protocol = ss->get_protocol_name();
+
+    if (current_protocol == QLatin1String(OCG_PROTO_OPENVPN)) {
+        if (ss->get_openvpn_config_text().isEmpty()) {
+            QMessageBox::information(this,
+                qApp->applicationName(),
+                tr("You need to specify or import an OpenVPN config file."));
+            delete ss;
+            return;
+        }
+
+        this->minimize_on_connect = ss->get_minimize();
+        this->cmd_fd = INVALID_SOCKET;
+
+        ovpninfo = new OpenVpnInfo(ss, this);
+        this->openvpninfo = ovpninfo;
+
+        future = QtConcurrent::run(openvpn_main_loop, ovpninfo, this);
+        this->futureWatcher.setFuture(future);
+        return;
     }
 
     query.setUrl(turl);

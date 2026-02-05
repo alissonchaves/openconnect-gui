@@ -20,6 +20,7 @@
 #include "server_storage.h"
 #include "cryptdata.h"
 #include "common.h"
+#include "openvpn_config.h"
 #include <OcSettings.h>
 #include <cstdio>
 
@@ -35,6 +36,14 @@ StoredServer::StoredServer()
     , m_reconnect_timeout{ 300 }
     , m_dtls_attempt_period{ 25 }
     , m_server_pin_algo(0)
+    , m_openvpn_nobind(false)
+    , m_openvpn_auth_user_pass(false)
+    , m_openvpn_persist_tun(false)
+    , m_openvpn_persist_key(false)
+    , m_openvpn_ncp_disable(false)
+    , m_openvpn_tls_client(false)
+    , m_openvpn_client(false)
+    , m_route_policy(RoutePolicyServer)
     , m_log_level (-1)
 {
     set_window(nullptr);
@@ -171,10 +180,92 @@ int StoredServer::load(QString& name)
 
     settings.beginGroup(PREFIX + name);
 
+    m_protocol_name = settings.value("protocol-name").toString();
+    m_openvpn_config = settings.value("openvpn-config").toString();
+    m_openvpn_config_text = settings.value("openvpn-config-text").toString();
+    m_openvpn_remote_host = settings.value("openvpn-remote-host").toString();
+    m_openvpn_remote_port = settings.value("openvpn-remote-port").toString();
+    m_openvpn_remote_proto = settings.value("openvpn-remote-proto").toString();
+    m_openvpn_dev = settings.value("openvpn-dev").toString();
+    m_openvpn_cipher = settings.value("openvpn-cipher").toString();
+    m_openvpn_data_ciphers = settings.value("openvpn-data-ciphers").toString();
+    m_openvpn_data_ciphers_fallback = settings.value("openvpn-data-ciphers-fallback").toString();
+    m_openvpn_auth = settings.value("openvpn-auth").toString();
+    m_openvpn_resolv_retry = settings.value("openvpn-resolv-retry").toString();
+    m_openvpn_remote_cert_tls = settings.value("openvpn-remote-cert-tls").toString();
+    m_openvpn_nobind = settings.value("openvpn-nobind", false).toBool();
+    m_openvpn_compress = settings.value("openvpn-compress").toString();
+    m_openvpn_ca = settings.value("openvpn-ca").toString();
+    m_openvpn_cert = settings.value("openvpn-cert").toString();
+    m_openvpn_key = settings.value("openvpn-key").toString();
+    m_openvpn_tls_auth = settings.value("openvpn-tls-auth").toString();
+    m_openvpn_tls_crypt = settings.value("openvpn-tls-crypt").toString();
+    m_openvpn_key_direction = settings.value("openvpn-key-direction").toString();
+    m_openvpn_setenv_client_cert = settings.value("openvpn-setenv-client-cert").toString();
+    m_openvpn_auth_user_pass = settings.value("openvpn-auth-user-pass", false).toBool();
+    m_openvpn_persist_tun = settings.value("openvpn-persist-tun", false).toBool();
+    m_openvpn_persist_key = settings.value("openvpn-persist-key", false).toBool();
+    m_openvpn_ncp_disable = settings.value("openvpn-ncp-disable", false).toBool();
+    m_openvpn_tls_client = settings.value("openvpn-tls-client", false).toBool();
+    m_openvpn_client = settings.value("openvpn-client", false).toBool();
+    m_dns_search_domains = settings.value("dns-search-domains").toString();
+    m_route_policy = settings.value("route-policy", RoutePolicyServer).toInt();
+    m_route_entries.clear();
+    const QStringList route_list = settings.value("route-entries").toStringList();
+    for (const QString& entry : route_list) {
+        const QStringList parts = entry.split(QLatin1Char('|'));
+        RouteEntry route;
+        if (parts.size() > 0) route.destination = parts.at(0);
+        if (parts.size() > 1) route.netmask = parts.at(1);
+        if (parts.size() > 2) route.gateway = parts.at(2);
+        if (!route.destination.isEmpty() || !route.netmask.isEmpty() || !route.gateway.isEmpty()) {
+            m_route_entries.push_back(route);
+        }
+    }
+
+    if (m_protocol_name == QLatin1String(OCG_PROTO_OPENVPN)
+        && m_openvpn_config_text.isEmpty() == false
+        && m_openvpn_remote_host.isEmpty()) {
+        OpenVpnConfig cfg;
+        if (parse_openvpn_config_text(m_openvpn_config_text, cfg, nullptr)) {
+            if (m_openvpn_remote_host.isEmpty()) m_openvpn_remote_host = cfg.remote_host;
+            if (m_openvpn_remote_port.isEmpty()) m_openvpn_remote_port = cfg.remote_port;
+            if (m_openvpn_remote_proto.isEmpty()) m_openvpn_remote_proto = cfg.remote_proto;
+            if (m_openvpn_dev.isEmpty()) m_openvpn_dev = cfg.dev;
+            if (m_openvpn_cipher.isEmpty()) m_openvpn_cipher = cfg.cipher;
+            if (m_openvpn_data_ciphers.isEmpty()) m_openvpn_data_ciphers = cfg.data_ciphers;
+            if (m_openvpn_data_ciphers_fallback.isEmpty()) m_openvpn_data_ciphers_fallback = cfg.data_ciphers_fallback;
+            if (m_openvpn_auth.isEmpty()) m_openvpn_auth = cfg.auth;
+            if (m_openvpn_resolv_retry.isEmpty()) m_openvpn_resolv_retry = cfg.resolv_retry;
+            if (m_openvpn_remote_cert_tls.isEmpty()) m_openvpn_remote_cert_tls = cfg.remote_cert_tls;
+            if (m_openvpn_compress.isEmpty()) m_openvpn_compress = cfg.compress;
+            if (m_openvpn_ca.isEmpty()) m_openvpn_ca = cfg.ca;
+            if (m_openvpn_cert.isEmpty()) m_openvpn_cert = cfg.cert;
+            if (m_openvpn_key.isEmpty()) m_openvpn_key = cfg.key;
+            if (m_openvpn_tls_auth.isEmpty()) m_openvpn_tls_auth = cfg.tls_auth;
+            if (m_openvpn_tls_crypt.isEmpty()) m_openvpn_tls_crypt = cfg.tls_crypt;
+            if (m_openvpn_key_direction.isEmpty()) m_openvpn_key_direction = cfg.key_direction;
+            if (m_openvpn_setenv_client_cert.isEmpty()) m_openvpn_setenv_client_cert = cfg.setenv_client_cert;
+            if (m_dns_search_domains.isEmpty() && !cfg.dns_search_domains.isEmpty()) {
+                m_dns_search_domains = cfg.dns_search_domains.join(QLatin1String(", "));
+            }
+            if (!m_openvpn_auth_user_pass) m_openvpn_auth_user_pass = cfg.auth_user_pass;
+            if (!m_openvpn_persist_tun) m_openvpn_persist_tun = cfg.persist_tun;
+            if (!m_openvpn_persist_key) m_openvpn_persist_key = cfg.persist_key;
+            if (!m_openvpn_ncp_disable) m_openvpn_ncp_disable = cfg.ncp_disable;
+            if (!m_openvpn_tls_client) m_openvpn_tls_client = cfg.tls_client;
+            if (!m_openvpn_client) m_openvpn_client = cfg.client;
+        }
+    }
+
     this->m_server_gateway = settings.value("server").toString();
     if (this->m_server_gateway.isEmpty() == true) {
         this->m_server_gateway = name;
-        rval = 0;
+        if (m_protocol_name == QLatin1String(OCG_PROTO_OPENVPN) && m_openvpn_config_text.isEmpty() == false) {
+            rval = 1;
+        } else {
+            rval = 0;
+        }
     }
 
     this->m_username = settings.value("username").toString();
@@ -239,8 +330,6 @@ int StoredServer::load(QString& name)
 
     this->m_token_type = settings.value("token-type").toInt();
 
-    m_protocol_name = settings.value("protocol-name").toString();
-
     m_interface_name = settings.value("interface-name").toString();
 #ifdef _WIN32
     /* truncate interface name to OC_IFNAME_MAX_LENGTH in case it was saved by a previous version
@@ -296,11 +385,54 @@ int StoredServer::save()
     settings.setValue("protocol-name", m_protocol_name);
 
     settings.setValue("interface-name", m_interface_name);
+    settings.setValue("dns-search-domains", m_dns_search_domains);
     settings.setValue("vpnc-script", m_vpnc_script_filename);
     if (m_log_level == -1)
         settings.remove("log-level");
     else
         settings.setValue("log-level", m_log_level);
+    if (m_openvpn_config.isEmpty()) {
+        settings.remove("openvpn-config");
+    } else {
+        settings.setValue("openvpn-config", m_openvpn_config);
+    }
+    if (m_openvpn_config_text.isEmpty()) {
+        settings.remove("openvpn-config-text");
+    } else {
+        settings.setValue("openvpn-config-text", m_openvpn_config_text);
+    }
+    settings.setValue("openvpn-remote-host", m_openvpn_remote_host);
+    settings.setValue("openvpn-remote-port", m_openvpn_remote_port);
+    settings.setValue("openvpn-remote-proto", m_openvpn_remote_proto);
+    settings.setValue("openvpn-dev", m_openvpn_dev);
+    settings.setValue("openvpn-cipher", m_openvpn_cipher);
+    settings.setValue("openvpn-data-ciphers", m_openvpn_data_ciphers);
+    settings.setValue("openvpn-data-ciphers-fallback", m_openvpn_data_ciphers_fallback);
+    settings.setValue("openvpn-auth", m_openvpn_auth);
+    settings.setValue("openvpn-resolv-retry", m_openvpn_resolv_retry);
+    settings.setValue("openvpn-remote-cert-tls", m_openvpn_remote_cert_tls);
+    settings.setValue("openvpn-nobind", m_openvpn_nobind);
+    settings.setValue("openvpn-compress", m_openvpn_compress);
+    settings.setValue("openvpn-ca", m_openvpn_ca);
+    settings.setValue("openvpn-cert", m_openvpn_cert);
+    settings.setValue("openvpn-key", m_openvpn_key);
+    settings.setValue("openvpn-tls-auth", m_openvpn_tls_auth);
+    settings.setValue("openvpn-tls-crypt", m_openvpn_tls_crypt);
+    settings.setValue("openvpn-key-direction", m_openvpn_key_direction);
+    settings.setValue("openvpn-setenv-client-cert", m_openvpn_setenv_client_cert);
+    settings.setValue("openvpn-auth-user-pass", m_openvpn_auth_user_pass);
+    settings.setValue("openvpn-persist-tun", m_openvpn_persist_tun);
+    settings.setValue("openvpn-persist-key", m_openvpn_persist_key);
+    settings.setValue("openvpn-ncp-disable", m_openvpn_ncp_disable);
+    settings.setValue("openvpn-tls-client", m_openvpn_tls_client);
+    settings.setValue("openvpn-client", m_openvpn_client);
+    settings.setValue("route-policy", m_route_policy);
+    QStringList route_list;
+    route_list.reserve(m_route_entries.size());
+    for (const RouteEntry& route : m_route_entries) {
+        route_list << (route.destination + QLatin1Char('|') + route.netmask + QLatin1Char('|') + route.gateway);
+    }
+    settings.setValue("route-entries", route_list);
 
     settings.endGroup();
     return 0;
@@ -466,6 +598,77 @@ void StoredServer::set_protocol_name(const QString name)
     m_protocol_name = name;
 }
 
+const QString& StoredServer::get_openvpn_config() const
+{
+    return this->m_openvpn_config;
+}
+
+void StoredServer::set_openvpn_config(const QString& openvpn_config)
+{
+    this->m_openvpn_config = openvpn_config;
+}
+
+const QString& StoredServer::get_openvpn_config_text() const
+{
+    return this->m_openvpn_config_text;
+}
+
+void StoredServer::set_openvpn_config_text(const QString& text)
+{
+    this->m_openvpn_config_text = text;
+}
+
+const QString& StoredServer::get_openvpn_remote_host() const { return this->m_openvpn_remote_host; }
+void StoredServer::set_openvpn_remote_host(const QString& host) { this->m_openvpn_remote_host = host; }
+const QString& StoredServer::get_openvpn_remote_port() const { return this->m_openvpn_remote_port; }
+void StoredServer::set_openvpn_remote_port(const QString& port) { this->m_openvpn_remote_port = port; }
+const QString& StoredServer::get_openvpn_remote_proto() const { return this->m_openvpn_remote_proto; }
+void StoredServer::set_openvpn_remote_proto(const QString& proto) { this->m_openvpn_remote_proto = proto; }
+const QString& StoredServer::get_openvpn_dev() const { return this->m_openvpn_dev; }
+void StoredServer::set_openvpn_dev(const QString& dev) { this->m_openvpn_dev = dev; }
+const QString& StoredServer::get_openvpn_cipher() const { return this->m_openvpn_cipher; }
+void StoredServer::set_openvpn_cipher(const QString& cipher) { this->m_openvpn_cipher = cipher; }
+const QString& StoredServer::get_openvpn_data_ciphers() const { return this->m_openvpn_data_ciphers; }
+void StoredServer::set_openvpn_data_ciphers(const QString& value) { this->m_openvpn_data_ciphers = value; }
+const QString& StoredServer::get_openvpn_data_ciphers_fallback() const { return this->m_openvpn_data_ciphers_fallback; }
+void StoredServer::set_openvpn_data_ciphers_fallback(const QString& value) { this->m_openvpn_data_ciphers_fallback = value; }
+const QString& StoredServer::get_openvpn_auth() const { return this->m_openvpn_auth; }
+void StoredServer::set_openvpn_auth(const QString& auth) { this->m_openvpn_auth = auth; }
+const QString& StoredServer::get_openvpn_resolv_retry() const { return this->m_openvpn_resolv_retry; }
+void StoredServer::set_openvpn_resolv_retry(const QString& value) { this->m_openvpn_resolv_retry = value; }
+const QString& StoredServer::get_openvpn_remote_cert_tls() const { return this->m_openvpn_remote_cert_tls; }
+void StoredServer::set_openvpn_remote_cert_tls(const QString& value) { this->m_openvpn_remote_cert_tls = value; }
+bool StoredServer::get_openvpn_nobind() const { return this->m_openvpn_nobind; }
+void StoredServer::set_openvpn_nobind(bool value) { this->m_openvpn_nobind = value; }
+const QString& StoredServer::get_openvpn_compress() const { return this->m_openvpn_compress; }
+void StoredServer::set_openvpn_compress(const QString& value) { this->m_openvpn_compress = value; }
+const QString& StoredServer::get_openvpn_ca() const { return this->m_openvpn_ca; }
+void StoredServer::set_openvpn_ca(const QString& value) { this->m_openvpn_ca = value; }
+const QString& StoredServer::get_openvpn_cert() const { return this->m_openvpn_cert; }
+void StoredServer::set_openvpn_cert(const QString& value) { this->m_openvpn_cert = value; }
+const QString& StoredServer::get_openvpn_key() const { return this->m_openvpn_key; }
+void StoredServer::set_openvpn_key(const QString& value) { this->m_openvpn_key = value; }
+const QString& StoredServer::get_openvpn_tls_auth() const { return this->m_openvpn_tls_auth; }
+void StoredServer::set_openvpn_tls_auth(const QString& value) { this->m_openvpn_tls_auth = value; }
+const QString& StoredServer::get_openvpn_tls_crypt() const { return this->m_openvpn_tls_crypt; }
+void StoredServer::set_openvpn_tls_crypt(const QString& value) { this->m_openvpn_tls_crypt = value; }
+const QString& StoredServer::get_openvpn_key_direction() const { return this->m_openvpn_key_direction; }
+void StoredServer::set_openvpn_key_direction(const QString& value) { this->m_openvpn_key_direction = value; }
+const QString& StoredServer::get_openvpn_setenv_client_cert() const { return this->m_openvpn_setenv_client_cert; }
+void StoredServer::set_openvpn_setenv_client_cert(const QString& value) { this->m_openvpn_setenv_client_cert = value; }
+bool StoredServer::get_openvpn_auth_user_pass() const { return this->m_openvpn_auth_user_pass; }
+void StoredServer::set_openvpn_auth_user_pass(bool value) { this->m_openvpn_auth_user_pass = value; }
+bool StoredServer::get_openvpn_persist_tun() const { return this->m_openvpn_persist_tun; }
+void StoredServer::set_openvpn_persist_tun(bool value) { this->m_openvpn_persist_tun = value; }
+bool StoredServer::get_openvpn_persist_key() const { return this->m_openvpn_persist_key; }
+void StoredServer::set_openvpn_persist_key(bool value) { this->m_openvpn_persist_key = value; }
+bool StoredServer::get_openvpn_ncp_disable() const { return this->m_openvpn_ncp_disable; }
+void StoredServer::set_openvpn_ncp_disable(bool value) { this->m_openvpn_ncp_disable = value; }
+bool StoredServer::get_openvpn_tls_client() const { return this->m_openvpn_tls_client; }
+void StoredServer::set_openvpn_tls_client(bool value) { this->m_openvpn_tls_client = value; }
+bool StoredServer::get_openvpn_client() const { return this->m_openvpn_client; }
+void StoredServer::set_openvpn_client(bool value) { this->m_openvpn_client = value; }
+
 void StoredServer::set_server_pin(const unsigned algo, const QByteArray& hash)
 {
     this->m_server_pin_algo = algo;
@@ -491,6 +694,16 @@ void StoredServer::set_interface_name(const QString& interface_name)
     this->m_interface_name = interface_name;
 }
 
+const QString& StoredServer::get_dns_search_domains() const
+{
+    return this->m_dns_search_domains;
+}
+
+void StoredServer::set_dns_search_domains(const QString& dns_search_domains)
+{
+    this->m_dns_search_domains = dns_search_domains;
+}
+
 const QString& StoredServer::get_vpnc_script_filename() const
 {
     return this->m_vpnc_script_filename;
@@ -499,6 +712,26 @@ const QString& StoredServer::get_vpnc_script_filename() const
 void StoredServer::set_vpnc_script_filename(const QString& vpnc_script_filename)
 {
     this->m_vpnc_script_filename = vpnc_script_filename;
+}
+
+int StoredServer::get_route_policy() const
+{
+    return m_route_policy;
+}
+
+void StoredServer::set_route_policy(int policy)
+{
+    m_route_policy = policy;
+}
+
+const QVector<StoredServer::RouteEntry>& StoredServer::get_route_entries() const
+{
+    return m_route_entries;
+}
+
+void StoredServer::set_route_entries(const QVector<RouteEntry>& entries)
+{
+    m_route_entries = entries;
 }
 
 int StoredServer::get_log_level()
@@ -510,4 +743,3 @@ void StoredServer::set_log_level(const int log_level)
 {
     this->m_log_level = log_level;
 }
-

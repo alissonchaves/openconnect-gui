@@ -41,3 +41,20 @@ should be run and this takes care of:
  - Creating a gitlab release
  - Copying the relevant changelong entries to release description
 
+## macOS release artifacts for Homebrew cask
+
+When a tag is pushed, CI job `MacOSRelease` builds a self-contained
+`OpenConnect-GUI.app` and exports:
+
+- `openconnect-gui-<version>-macos-<arch>.zip`
+- `openconnect-gui-<version>-macos-<arch>.zip.sha256`
+
+These artifacts are produced after `macdeployqt` + `macdeployqtfix`, so the app
+does not require Homebrew runtime dependencies (`qt`, `openconnect`, `gnutls`)
+on the target machine.
+
+Suggested cask strategy:
+
+1. Attach the generated `.zip` and `.sha256` as release assets in GitLab.
+2. Point the cask `url` to the release asset URL.
+3. Use `depends_on macos: ">= :catalina"` in the cask.

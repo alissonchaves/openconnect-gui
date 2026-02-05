@@ -15,109 +15,116 @@
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
-    <layout class="QFormLayout" name="settingsProfileLayout">
-     <property name="fieldGrowthPolicy">
-      <enum>QFormLayout::ExpandingFieldsGrow</enum>
+    <widget class="QScrollArea" name="contentScrollArea">
+     <property name="widgetResizable">
+      <bool>true</bool>
      </property>
-     <item row="0" column="0">
-      <widget class="QLabel" name="nameLabel">
-       <property name="text">
-        <string>Name</string>
-       </property>
-      </widget>
-     </item>
-     <item row="0" column="1">
-      <widget class="QLineEdit" name="nameEdit">
-       <property name="toolTip">
-        <string>This is a friendly name to distinguish the connection</string>
-       </property>
-       <property name="placeholderText">
-        <string>User friendly unique connection name</string>
-       </property>
-      </widget>
-     </item>
-     <item row="1" column="0">
-      <widget class="QLabel" name="gatewayLabel">
-       <property name="text">
-        <string>Gateway</string>
-       </property>
-      </widget>
-     </item>
-     <item row="1" column="1">
-      <widget class="QLineEdit" name="gatewayEdit">
-       <property name="toolTip">
-        <string>Specify the hostname to connect to; a port may be specified after the host separated with a colon ':'</string>
-       </property>
-       <property name="statusTip">
-        <string/>
-       </property>
-       <property name="whatsThis">
-        <string/>
-       </property>
-       <property name="placeholderText">
-        <string>https://my_server[:443]/[usergroup]</string>
-       </property>
-      </widget>
-     </item>
-     <item row="2" column="0">
-      <widget class="QLabel" name="usernameLabel">
-       <property name="text">
-        <string>Username</string>
-       </property>
-      </widget>
-     </item>
-     <item row="2" column="1">
-      <widget class="QLineEdit" name="usernameEdit">
-       <property name="toolTip">
-        <string>Specify the username used in that gateway</string>
-       </property>
-      </widget>
-     </item>
-     <item row="3" column="0">
-      <widget class="QLabel" name="groupnameLabel">
-       <property name="text">
-        <string>Groupname</string>
-       </property>
-      </widget>
-     </item>
-     <item row="3" column="1">
-      <layout class="QHBoxLayout" name="groupnameLayout">
+     <widget class="QWidget" name="contentScrollWidget">
+      <layout class="QVBoxLayout" name="contentScrollLayout">
        <item>
-        <widget class="QLineEdit" name="groupnameEdit">
-         <property name="styleSheet">
-          <string notr="true">background-color:&quot;transparent&quot;</string>
+        <layout class="QFormLayout" name="settingsProfileLayout">
+         <property name="fieldGrowthPolicy">
+          <enum>QFormLayout::ExpandingFieldsGrow</enum>
          </property>
-         <property name="frame">
-          <bool>false</bool>
-         </property>
-         <property name="readOnly">
-          <bool>true</bool>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QToolButton" name="groupnameClear">
-         <property name="enabled">
-          <bool>false</bool>
-         </property>
-         <property name="text">
-          <string/>
-         </property>
-         <property name="icon">
-          <iconset resource="../openconnect-gui.qrc">
-           <normaloff>:/images/trashcan.png</normaloff>:/images/trashcan.png</iconset>
-         </property>
-        </widget>
-       </item>
-      </layout>
-     </item>
-     <item row="4" column="0">
-      <widget class="QLabel" name="caCertificateLabel">
-       <property name="text">
-        <string>CA Certificate</string>
-       </property>
-      </widget>
-     </item>
+         <item row="0" column="0">
+          <widget class="QLabel" name="nameLabel">
+           <property name="text">
+            <string>Name</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="QLineEdit" name="nameEdit">
+           <property name="toolTip">
+            <string>This is a friendly name to distinguish the connection</string>
+           </property>
+           <property name="placeholderText">
+            <string>User friendly unique connection name</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="gatewayLabel">
+           <property name="text">
+            <string>Gateway</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="QLineEdit" name="gatewayEdit">
+           <property name="toolTip">
+            <string>Specify the hostname to connect to; a port may be specified after the host separated with a colon ':'</string>
+           </property>
+           <property name="statusTip">
+            <string/>
+           </property>
+           <property name="whatsThis">
+            <string/>
+           </property>
+           <property name="placeholderText">
+            <string>https://my_server[:443]/[usergroup]</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="0">
+          <widget class="QLabel" name="usernameLabel">
+           <property name="text">
+            <string>Username</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="1">
+          <widget class="QLineEdit" name="usernameEdit">
+           <property name="toolTip">
+            <string>Specify the username used in that gateway</string>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="0">
+          <widget class="QLabel" name="groupnameLabel">
+           <property name="text">
+            <string>Groupname</string>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="1">
+          <layout class="QHBoxLayout" name="groupnameLayout">
+           <item>
+            <widget class="QLineEdit" name="groupnameEdit">
+             <property name="styleSheet">
+              <string notr="true">background-color:&quot;transparent&quot;</string>
+             </property>
+             <property name="frame">
+              <bool>false</bool>
+             </property>
+             <property name="readOnly">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QToolButton" name="groupnameClear">
+             <property name="enabled">
+              <bool>false</bool>
+             </property>
+             <property name="text">
+              <string/>
+             </property>
+             <property name="icon">
+              <iconset resource="../openconnect-gui.qrc">
+               <normaloff>:/images/trashcan.png</normaloff>:/images/trashcan.png</iconset>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+         <item row="4" column="0">
+          <widget class="QLabel" name="caCertificateLabel">
+           <property name="text">
+            <string>CA Certificate</string>
+           </property>
+          </widget>
+         </item>
      <item row="4" column="1">
       <layout class="QHBoxLayout" name="caCertificatLayout">
        <item>
@@ -347,7 +354,7 @@ Leave blank for default.</string>
        </item>
       </layout>
      </item>
-     <item row="12" column="1">
+     <item row="13" column="1">
       <widget class="QComboBox" name="loglevelBox">
        <property name="sizePolicy">
         <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
@@ -389,6 +396,25 @@ Leave blank for default.</string>
       </widget>
      </item>
      <item row="12" column="0">
+      <widget class="QLabel" name="dnsSearchDomainsLabel">
+       <property name="text">
+        <string>DNS search domains</string>
+       </property>
+      </widget>
+     </item>
+     <item row="12" column="1">
+      <widget class="QLineEdit" name="dnsSearchDomainsEdit">
+       <property name="toolTip">
+        <string>Comma or space separated DNS search domains.
+
+Examples: av.it.pt, corp.local</string>
+       </property>
+       <property name="placeholderText">
+        <string>(Optional) e.g. av.it.pt, corp.local</string>
+       </property>
+      </widget>
+     </item>
+     <item row="13" column="0">
       <widget class="QLabel" name="logLevelLabel">
        <property name="text">
         <string>Log Level</string>
@@ -563,6 +589,400 @@ Leave blank for default.</string>
        </layout>
       </widget>
      </widget>
+     <widget class="QWidget" name="openvpnTab">
+      <attribute name="title">
+       <string>OpenVPN</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="verticalLayout_openvpn">
+       <item>
+        <layout class="QFormLayout" name="formLayout_openvpn">
+         <property name="fieldGrowthPolicy">
+          <enum>QFormLayout::ExpandingFieldsGrow</enum>
+         </property>
+         <item row="0" column="0">
+          <widget class="QLabel" name="openvpnRemoteHostLabel">
+           <property name="text">
+            <string>Remote host</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="QLineEdit" name="openvpnRemoteHostEdit"/>
+         </item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="openvpnRemotePortLabel">
+           <property name="text">
+            <string>Remote port</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="QLineEdit" name="openvpnRemotePortEdit"/>
+         </item>
+         <item row="2" column="0">
+          <widget class="QLabel" name="openvpnRemoteProtoLabel">
+           <property name="text">
+            <string>Remote proto</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="1">
+          <widget class="QLineEdit" name="openvpnRemoteProtoEdit"/>
+         </item>
+         <item row="3" column="0">
+          <widget class="QLabel" name="openvpnDevLabel">
+           <property name="text">
+            <string>Device</string>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="1">
+          <widget class="QLineEdit" name="openvpnDevEdit"/>
+         </item>
+         <item row="4" column="0">
+          <widget class="QLabel" name="openvpnCipherLabel">
+           <property name="text">
+            <string>Cipher</string>
+           </property>
+          </widget>
+         </item>
+         <item row="4" column="1">
+          <widget class="QLineEdit" name="openvpnCipherEdit"/>
+         </item>
+         <item row="5" column="0">
+          <widget class="QLabel" name="openvpnDataCiphersLabel">
+           <property name="text">
+            <string>Data ciphers</string>
+           </property>
+          </widget>
+         </item>
+         <item row="5" column="1">
+          <widget class="QLineEdit" name="openvpnDataCiphersEdit"/>
+         </item>
+         <item row="6" column="0">
+          <widget class="QLabel" name="openvpnDataCiphersFallbackLabel">
+           <property name="text">
+            <string>Data ciphers fallback</string>
+           </property>
+          </widget>
+         </item>
+         <item row="6" column="1">
+          <widget class="QLineEdit" name="openvpnDataCiphersFallbackEdit"/>
+         </item>
+         <item row="7" column="0">
+          <widget class="QLabel" name="openvpnAuthLabel">
+           <property name="text">
+            <string>Auth</string>
+           </property>
+          </widget>
+         </item>
+         <item row="7" column="1">
+          <widget class="QLineEdit" name="openvpnAuthEdit"/>
+         </item>
+         <item row="8" column="0">
+          <widget class="QLabel" name="openvpnAuthUserPassLabel">
+           <property name="text">
+            <string>Auth user/pass</string>
+           </property>
+          </widget>
+         </item>
+         <item row="8" column="1">
+          <widget class="QCheckBox" name="openvpnAuthUserPassCheck">
+           <property name="text">
+            <string>Enable</string>
+           </property>
+          </widget>
+         </item>
+         <item row="9" column="0">
+          <widget class="QLabel" name="openvpnRemoteCertTlsLabel">
+           <property name="text">
+            <string>Remote cert TLS</string>
+           </property>
+          </widget>
+         </item>
+         <item row="9" column="1">
+          <widget class="QLineEdit" name="openvpnRemoteCertTlsEdit"/>
+         </item>
+         <item row="10" column="0">
+          <widget class="QLabel" name="openvpnCompressLabel">
+           <property name="text">
+            <string>Compress</string>
+           </property>
+          </widget>
+         </item>
+         <item row="10" column="1">
+          <widget class="QLineEdit" name="openvpnCompressEdit"/>
+         </item>
+         <item row="11" column="0">
+          <widget class="QLabel" name="openvpnResolvRetryLabel">
+           <property name="text">
+            <string>Resolv retry</string>
+           </property>
+          </widget>
+         </item>
+         <item row="11" column="1">
+          <widget class="QLineEdit" name="openvpnResolvRetryEdit"/>
+         </item>
+         <item row="12" column="0">
+          <widget class="QLabel" name="openvpnNoBindLabel">
+           <property name="text">
+            <string>No bind</string>
+           </property>
+          </widget>
+         </item>
+         <item row="12" column="1">
+          <widget class="QCheckBox" name="openvpnNoBindCheck">
+           <property name="text">
+            <string>Enable</string>
+           </property>
+          </widget>
+         </item>
+         <item row="13" column="0">
+          <widget class="QLabel" name="openvpnPersistTunLabel">
+           <property name="text">
+            <string>Persist tun</string>
+           </property>
+          </widget>
+         </item>
+         <item row="13" column="1">
+          <widget class="QCheckBox" name="openvpnPersistTunCheck">
+           <property name="text">
+            <string>Enable</string>
+           </property>
+          </widget>
+         </item>
+         <item row="14" column="0">
+          <widget class="QLabel" name="openvpnPersistKeyLabel">
+           <property name="text">
+            <string>Persist key</string>
+           </property>
+          </widget>
+         </item>
+         <item row="14" column="1">
+          <widget class="QCheckBox" name="openvpnPersistKeyCheck">
+           <property name="text">
+            <string>Enable</string>
+           </property>
+          </widget>
+         </item>
+         <item row="15" column="0">
+          <widget class="QLabel" name="openvpnNcpDisableLabel">
+           <property name="text">
+            <string>NCP disable</string>
+           </property>
+          </widget>
+         </item>
+         <item row="15" column="1">
+          <widget class="QCheckBox" name="openvpnNcpDisableCheck">
+           <property name="text">
+            <string>Enable</string>
+           </property>
+          </widget>
+         </item>
+         <item row="16" column="0">
+          <widget class="QLabel" name="openvpnTlsClientLabel">
+           <property name="text">
+            <string>TLS client</string>
+           </property>
+          </widget>
+         </item>
+         <item row="16" column="1">
+          <widget class="QCheckBox" name="openvpnTlsClientCheck">
+           <property name="text">
+            <string>Enable</string>
+           </property>
+          </widget>
+         </item>
+         <item row="17" column="0">
+          <widget class="QLabel" name="openvpnClientLabel">
+           <property name="text">
+            <string>Client</string>
+           </property>
+          </widget>
+         </item>
+         <item row="17" column="1">
+          <widget class="QCheckBox" name="openvpnClientCheck">
+           <property name="text">
+            <string>Enable</string>
+           </property>
+          </widget>
+         </item>
+         <item row="18" column="0">
+          <widget class="QLabel" name="openvpnSetenvClientCertLabel">
+           <property name="text">
+            <string>CLIENT_CERT</string>
+           </property>
+          </widget>
+         </item>
+         <item row="18" column="1">
+          <widget class="QLineEdit" name="openvpnSetenvClientCertEdit"/>
+         </item>
+         <item row="19" column="0">
+          <widget class="QLabel" name="openvpnKeyDirectionLabel">
+           <property name="text">
+            <string>Key direction</string>
+           </property>
+          </widget>
+         </item>
+         <item row="19" column="1">
+          <widget class="QLineEdit" name="openvpnKeyDirectionEdit"/>
+         </item>
+         <item row="20" column="0">
+          <widget class="QLabel" name="openvpnCaLabel">
+           <property name="text">
+            <string>CA</string>
+           </property>
+          </widget>
+         </item>
+         <item row="20" column="1">
+          <widget class="QPlainTextEdit" name="openvpnCaEdit"/>
+         </item>
+         <item row="21" column="0">
+          <widget class="QLabel" name="openvpnCertLabel">
+           <property name="text">
+            <string>Client cert</string>
+           </property>
+          </widget>
+         </item>
+         <item row="21" column="1">
+          <widget class="QPlainTextEdit" name="openvpnCertEdit"/>
+         </item>
+         <item row="22" column="0">
+          <widget class="QLabel" name="openvpnKeyLabel">
+           <property name="text">
+            <string>Client key</string>
+           </property>
+          </widget>
+         </item>
+         <item row="22" column="1">
+          <widget class="QPlainTextEdit" name="openvpnKeyEdit"/>
+         </item>
+         <item row="23" column="0">
+          <widget class="QLabel" name="openvpnTlsAuthLabel">
+           <property name="text">
+            <string>TLS auth</string>
+           </property>
+          </widget>
+         </item>
+         <item row="23" column="1">
+          <widget class="QPlainTextEdit" name="openvpnTlsAuthEdit"/>
+         </item>
+         <item row="24" column="0">
+          <widget class="QLabel" name="openvpnTlsCryptLabel">
+           <property name="text">
+            <string>TLS crypt</string>
+           </property>
+          </widget>
+         </item>
+         <item row="24" column="1">
+          <widget class="QPlainTextEdit" name="openvpnTlsCryptEdit"/>
+         </item>
+        </layout>
+       </item>
+     </layout>
+    </widget>
+    <widget class="QWidget" name="routesTab">
+     <attribute name="title">
+      <string>Routes</string>
+     </attribute>
+     <layout class="QVBoxLayout" name="verticalLayout_routes">
+      <item>
+       <widget class="QGroupBox" name="routePolicyGroup">
+        <property name="title">
+         <string>Route policy</string>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout_routePolicy">
+         <item>
+          <widget class="QRadioButton" name="routePolicyServerRadio">
+           <property name="text">
+            <string>Use routes from server (default)</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QRadioButton" name="routePolicyVpnDefaultRadio">
+           <property name="text">
+            <string>Use VPN for all traffic (def1)</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QRadioButton" name="routePolicyManualRadio">
+           <property name="text">
+            <string>Only manual routes</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item>
+       <widget class="QGroupBox" name="manualRoutesGroup">
+        <property name="title">
+         <string>Manual routes</string>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout_manualRoutes">
+         <item>
+          <widget class="QTableWidget" name="manualRoutesTable">
+           <property name="columnCount">
+            <number>3</number>
+           </property>
+           <property name="rowCount">
+            <number>0</number>
+           </property>
+           <column>
+            <property name="text">
+             <string>Destination</string>
+            </property>
+           </column>
+           <column>
+            <property name="text">
+             <string>Netmask</string>
+            </property>
+           </column>
+           <column>
+            <property name="text">
+             <string>Gateway</string>
+            </property>
+           </column>
+          </widget>
+         </item>
+         <item>
+          <layout class="QHBoxLayout" name="manualRoutesButtonsLayout">
+           <item>
+            <widget class="QPushButton" name="routeAddButton">
+             <property name="text">
+              <string>Add route</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="routeRemoveButton">
+             <property name="text">
+              <string>Remove route</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <spacer name="manualRoutesSpacer">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
+         </item>
+        </layout>
+       </widget>
+      </item>
+     </layout>
+    </widget>
     </widget>
    </item>
    <item>
@@ -664,6 +1084,10 @@ The default timeout is 300 seconds, which means that openconnect can recover VPN
        </layout>
       </item>
      </layout>
+    </widget>
+   </item>
+      </layout>
+     </widget>
     </widget>
    </item>
    <item>

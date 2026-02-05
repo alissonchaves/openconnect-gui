@@ -2,12 +2,12 @@ cmake_minimum_required(VERSION 3.12 FATAL_ERROR)
 
 if(APPLE)
      if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
-        set(CMAKE_OSX_DEPLOYMENT_TARGET "10.12" CACHE STRING "" FORCE)
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "" FORCE)
     endif()
 endif()
 
 project(openconnect-gui
-    VERSION 1.6.2
+    VERSION 1.6.3
     HOMEPAGE_URL https://gui.openconnect-vpn.net/
     LANGUAGES CXX
 )
@@ -68,4 +68,3 @@ include(git_revision_main)
 include(build_timestamp_main)
 
 include(ProjectPackage)
-
