@@ -231,7 +231,7 @@ MacOSRelease:
   - ditto -c -k --sequesterRsrc --keepParent ./bin/OpenConnect-GUI.app "./${PKG}"
   - shasum -a 256 "./${PKG}" > "./${PKG}.sha256"
   artifacts:
-    expire_in: 1 week
+    expire_in: never
     when: always
     paths:
       - build/openconnect-gui-*-macos-*.zip
