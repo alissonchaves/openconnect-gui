@@ -101,6 +101,15 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName)
 {
     ui->setupUi(this);
 
+    // Keep the Dock icon fixed to the "connected" icon regardless of VPN state.
+    {
+        QFileSelector selector;
+        QIcon dockIcon(selector.select(QStringLiteral(":/images/network-connected.png")));
+        dockIcon.setIsMask(false);
+        setWindowIcon(dockIcon);
+        qApp->setWindowIcon(dockIcon);
+    }
+
     connect(ui->viewLogButton, &QPushButton::clicked,
         this, &MainWindow::createLogDialog);
 
