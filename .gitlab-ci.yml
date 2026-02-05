@@ -198,3 +198,42 @@ MacOS14:
     when: always
     paths:
       - build/bin/OpenConnect-GUI.app
+
+MacOSRelease:
+  stage: testing
+  image: $MACOS14_BUILD
+  tags: [ saas-macos-medium-m1 ]
+  only:
+  - tags
+  variables:
+    HOMEBREW_NO_AUTO_UPDATE: 1
+    HOMEBREW_NO_INSTALL_UPGRADE: 1
+    HOMEBREW_NO_INSTALL_CLEANUP: 1
+    HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
+    BUILD_TYPE: "Release"
+  before_script:
+  - brew --env
+  - brew config
+  - brew install cmake pkgconf qt@6 openconnect
+  script:
+  - mkdir -p build
+  - cd build
+  - cmake .. -DQt6_DIR=$(brew --prefix qt6)/lib/cmake/Qt6 -DCMAKE_BUILD_TYPE="$BUILD_TYPE" -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 -DCMAKE_CXX_FLAGS="-Wno-deprecated-declarations"
+  - cmake --build . --config "$BUILD_TYPE"
+  - QT_VERSION=$(brew list qt@6 --versions | awk '{print $2}')
+  - /opt/homebrew/opt/qt/bin/macdeployqt ./bin/OpenConnect-GUI.app -verbose=2
+  - curl -OL https://raw.githubusercontent.com/arl/macdeployqtfix/refs/heads/master/macdeployqtfix.py
+  - python3 macdeployqtfix.py ./bin/OpenConnect-GUI.app /opt/homebrew/Cellar/qt/$QT_VERSION/
+  - codesign --deep --force -s - bin/OpenConnect-GUI.app
+  - VERSION="${CI_COMMIT_TAG#v}"
+  - ARCH="$(uname -m)"
+  - PKG="openconnect-gui-${VERSION}-macos-${ARCH}.zip"
+  - ditto -c -k --sequesterRsrc --keepParent ./bin/OpenConnect-GUI.app "./${PKG}"
+  - shasum -a 256 "./${PKG}" > "./${PKG}.sha256"
+  artifacts:
+    expire_in: 1 week
+    when: always
+    paths:
+      - build/openconnect-gui-*-macos-*.zip
+      - build/openconnect-gui-*-macos-*.zip.sha256
+      - build/bin/OpenConnect-GUI.app
