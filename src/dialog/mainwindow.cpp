@@ -157,7 +157,7 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName)
 
         QFileSelector selector;
         QIcon icon(selector.select(QStringLiteral(":/images/network-disconnected.png")));
-        icon.setIsMask(true);
+        icon.setIsMask(false);
         m_trayIcon->setIcon(icon);
         m_trayIcon->show();
     } else {
@@ -572,7 +572,7 @@ void MainWindow::changeStatus(int val)
         QFileSelector selector;
         if (m_trayIcon) {
             QIcon icon(selector.select(QStringLiteral(":/images/network-connected.png")));
-            icon.setIsMask(true);
+            icon.setIsMask(false);
             m_trayIcon->setIcon(icon);
         }
 
@@ -587,12 +587,15 @@ void MainWindow::changeStatus(int val)
         if (this->minimize_on_connect) {
             if (m_trayIcon) {
                 hide();
-                m_trayIcon->showMessage(QLatin1String("Connected"), QLatin1String("You are connected to ") + ui->serverList->currentText(),
-                    QSystemTrayIcon::Information,
-                    10000);
             } else {
                 this->setWindowState(Qt::WindowMinimized);
             }
+        }
+
+        if (m_trayIcon && this->isHidden()) {
+            m_trayIcon->showMessage(QLatin1String("Connected"), QLatin1String("You are connected to ") + ui->serverList->currentText(),
+                QSystemTrayIcon::Information,
+                10000);
         }
 
         if (m_trayIcon) {
@@ -603,7 +606,7 @@ void MainWindow::changeStatus(int val)
         if (m_trayIcon) {
             QFileSelector selector;
             QIcon icon(selector.select(QStringLiteral(":/images/network-disconnected.png")));
-            icon.setIsMask(true);
+            icon.setIsMask(false);
             m_trayIcon->setIcon(icon);
             m_trayIcon->setToolTip(QLatin1String("Connecting to ") + ui->serverList->currentText());
         }
@@ -656,7 +659,7 @@ void MainWindow::changeStatus(int val)
         if (m_trayIcon) {
             QFileSelector selector;
             QIcon icon(selector.select(QStringLiteral(":/images/network-disconnected.png")));
-            icon.setIsMask(true);
+            icon.setIsMask(false);
             m_trayIcon->setIcon(icon);
 
             if (this->isHidden() == true)
