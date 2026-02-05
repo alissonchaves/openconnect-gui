@@ -7,7 +7,7 @@ if(APPLE)
 endif()
 
 project(openconnect-gui
-    VERSION 1.6.2
+    VERSION 1.6.3
     HOMEPAGE_URL https://gui.openconnect-vpn.net/
     LANGUAGES CXX
 )
@@ -68,4 +68,3 @@ include(git_revision_main)
 include(build_timestamp_main)
 
 include(ProjectPackage)
-

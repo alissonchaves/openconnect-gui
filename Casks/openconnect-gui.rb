@@ -1,7 +1,7 @@
 cask "openconnect-gui" do
   arch arm: "arm64"
 
-  version "1.6.2"
+  version "1.6.3"
   sha256 :no_check
 
   url "https://gitlab.com/alissonchaves/openconnect-gui/-/jobs/artifacts/v#{version}/raw/build/openconnect-gui-#{version}-macos-#{arch}.zip?job=MacOSRelease",
