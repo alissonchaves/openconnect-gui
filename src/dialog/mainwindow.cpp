@@ -565,6 +565,15 @@ void MainWindow::blink_ui()
 void MainWindow::changeStatus(int val)
 {
     if (val == STATUS_CONNECTED) {
+        QApplication::beep();
+        if (m_trayIcon) {
+            m_trayIcon->showMessage(QLatin1String("Connected"),
+                QLatin1String("You are connected to ") + ui->serverList->currentText(),
+                QSystemTrayIcon::Information,
+                10000);
+        } else {
+            QApplication::beep();
+        }
 
         blink_timer->stop();
 
@@ -603,12 +612,6 @@ void MainWindow::changeStatus(int val)
             }
         }
 
-        if (m_trayIcon && this->isHidden()) {
-            m_trayIcon->showMessage(QLatin1String("Connected"), QLatin1String("You are connected to ") + ui->serverList->currentText(),
-                QSystemTrayIcon::Information,
-                10000);
-        }
-
         if (m_trayIcon) {
             m_trayIcon->setToolTip(QLatin1String("Connected to ") + ui->serverList->currentText());
         }
@@ -640,6 +643,16 @@ void MainWindow::changeStatus(int val)
             this, &MainWindow::on_disconnectClicked,
             Qt::QueuedConnection);
     } else if (val == STATUS_DISCONNECTED) {
+        QApplication::beep();
+        if (m_trayIcon) {
+            m_trayIcon->showMessage(QLatin1String("Disconnected"),
+                QLatin1String("You were disconnected from the VPN"),
+                QSystemTrayIcon::Warning,
+                10000);
+        } else {
+            QApplication::beep();
+        }
+
         blink_timer->stop();
         if (this->timer->isActive()) {
             timer->stop();
@@ -673,11 +686,6 @@ void MainWindow::changeStatus(int val)
             QIcon icon(selector.select(QStringLiteral(":/images/network-disconnected.png")));
             icon.setIsMask(false);
             m_trayIcon->setIcon(icon);
-
-            if (this->isHidden() == true)
-                m_trayIcon->showMessage(QLatin1String("Disconnected"), QLatin1String("You were disconnected from the VPN"),
-                    QSystemTrayIcon::Warning,
-                    10000);
 
             m_trayIcon->setToolTip(QLatin1String("Disconnected"));
         }

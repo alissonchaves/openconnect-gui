@@ -67,11 +67,11 @@ if(MINGW)
 endif()
 if(APPLE)
     list(APPEND ${PROJECT_NAME}_RESOURCES
-        Resources/mono_lock.icns
+        Resources/vpn_connected.icns
         ${OPENCONNECT_VPNC_SCRIPT}
     )
     set_source_files_properties(
-        Resources/mono_lock.icns
+        Resources/vpn_connected.icns
         ${OPENCONNECT_VPNC_SCRIPT}
             PROPERTIES MACOSX_PACKAGE_LOCATION Resources
     )
@@ -153,8 +153,18 @@ if(APPLE)
         MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}"
         MACOSX_BUNDLE_COPYRIGHT "${PRODUCT_NAME_COPYRIGHT_SHORT}"
         MACOSX_BUNDLE_GUI_IDENTIFIER net.openconnect-vpn.gui
-        MACOSX_BUNDLE_ICON_FILE mono_lock.icns
+        MACOSX_BUNDLE_ICON_FILE vpn_connected.icns
         MACOSX_BUNDLE_INFO_STRING ${PRODUCT_NAME_LONG}
+    )
+
+    # Bump CFBundleVersion on every build so macOS refreshes cached app metadata
+    # (including Notification Center icon) for the same bundle identifier.
+    add_custom_command(
+        TARGET ${PROJECT_NAME}
+        POST_BUILD
+        COMMAND /bin/bash -lc "c=$(git -C '${CMAKE_SOURCE_DIR}' rev-list --count HEAD 2>/dev/null || echo 0); v='${PROJECT_VERSION}.'$c; p='$<TARGET_FILE_DIR:${PROJECT_NAME}>/../Info.plist'; /usr/libexec/PlistBuddy -c \"Set :CFBundleVersion $v\" \"$p\" || /usr/libexec/PlistBuddy -c \"Add :CFBundleVersion string $v\" \"$p\""
+        COMMENT "Updating CFBundleVersion with git commit count"
+        VERBATIM
     )
 endif()
 

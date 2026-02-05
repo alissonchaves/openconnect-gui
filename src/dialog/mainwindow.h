@@ -147,7 +147,6 @@ private:
     QString latest_version;
     time_t last_check_time;
     QProgressDialog *downloadProgress;
-
     QNetworkAccessManager *manager;
 
     QStateMachine* m_appWindowStateMachine;
