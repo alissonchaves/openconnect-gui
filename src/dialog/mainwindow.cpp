@@ -113,6 +113,46 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName)
     }
 #endif
 
+    {
+        auto setLink = [](QLabel* label, const QString& url, const QString& text) {
+            label->setText(QStringLiteral("<a href=\"%1\">%2</a>").arg(url, text));
+            label->setOpenExternalLinks(true);
+        };
+
+        if (ui->aboutNameLabel) {
+            ui->aboutNameLabel->setText(QLatin1String(PRODUCT_NAME_LONG));
+        }
+        if (ui->aboutVersionLabel) {
+            ui->aboutVersionLabel->setText(QLatin1String(PROJECT_VERSION));
+        }
+        if (ui->aboutBuildLabel) {
+            ui->aboutBuildLabel->setText(QLatin1String(appBuildOn));
+        }
+        if (ui->aboutQtLabel) {
+            ui->aboutQtLabel->setText(tr("Qt %1").arg(QT_VERSION_STR));
+        }
+        if (ui->aboutOpenConnectLabel) {
+            ui->aboutOpenConnectLabel->setText(QLatin1String(openconnect_get_version()));
+        }
+        if (ui->aboutSystemLabel) {
+            ui->aboutSystemLabel->setText(QSysInfo::prettyProductName());
+        }
+        if (ui->aboutArchLabel) {
+            ui->aboutArchLabel->setText(QSysInfo::buildCpuArchitecture());
+        }
+        if (ui->aboutReleasesLabel) {
+            setLink(ui->aboutReleasesLabel, QLatin1String(APP_RELEASES_URL), tr("GitHub Releases"));
+        }
+        if (ui->aboutIssuesLabel) {
+            setLink(ui->aboutIssuesLabel, QLatin1String(APP_ISSUES_URL), tr("GitHub Issues"));
+        }
+        if (ui->aboutLicenseLabel) {
+            setLink(ui->aboutLicenseLabel,
+                QStringLiteral("https://github.com/alissonchaves/openconnect-gui/blob/main/LICENSE.txt"),
+                tr("GPLv2+"));
+        }
+    }
+
     connect(ui->viewLogButton, &QPushButton::clicked,
         this, &MainWindow::createLogDialog);
 
