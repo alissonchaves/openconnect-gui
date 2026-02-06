@@ -116,15 +116,15 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName)
 
     if (ui->aboutTextBrowser) {
         const QString html = QStringLiteral(
-            "<div style=\"font-size:13px;\">"
-            "<h2 style=\"margin-bottom:8px;\">%1</h2>"
-            "<table style=\"border-spacing:8px 4px;\">"
-            "<tr><td><b>Version</b></td><td>%2</td></tr>"
-            "<tr><td><b>Build</b></td><td>%3</td></tr>"
-            "<tr><td><b>Qt</b></td><td>Qt %4</td></tr>"
-            "<tr><td><b>OpenConnect</b></td><td>%5</td></tr>"
-            "<tr><td><b>System</b></td><td>%6</td></tr>"
-            "<tr><td><b>Architecture</b></td><td>%7</td></tr>"
+            "<div style=\"font-size:13px; line-height:1.35;\">"
+            "<div style=\"font-size:16px; font-weight:600; margin-bottom:8px;\">%1</div>"
+            "<table style=\"border-collapse:collapse;\">"
+            "<tr><td style=\"padding:2px 14px 2px 0; color:#bbb;\">Version</td><td>%2</td></tr>"
+            "<tr><td style=\"padding:2px 14px 2px 0; color:#bbb;\">Build</td><td>%3</td></tr>"
+            "<tr><td style=\"padding:2px 14px 2px 0; color:#bbb;\">Qt</td><td>Qt %4</td></tr>"
+            "<tr><td style=\"padding:2px 14px 2px 0; color:#bbb;\">OpenConnect</td><td>%5</td></tr>"
+            "<tr><td style=\"padding:2px 14px 2px 0; color:#bbb;\">System</td><td>%6</td></tr>"
+            "<tr><td style=\"padding:2px 14px 2px 0; color:#bbb;\">Architecture</td><td>%7</td></tr>"
             "</table>"
             "<div style=\"margin-top:10px;\">"
             "<a href=\"%8\">GitHub Releases</a><br/>"
@@ -174,7 +174,7 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName)
             if (state != Qt::ApplicationActive) {
                 return;
             }
-            forceShowAndRepaint();
+            openMainWindow();
         });
 #endif
 
@@ -324,13 +324,15 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName)
 
     QState* s112_minimizedWindow = new QState();
     m_appWindowStateMachine->addState(s112_minimizedWindow);
-    connect(s112_minimizedWindow, &QState::entered, [=]() {
+    connect(s112_minimizedWindow, &QState::entered, [this]() {
         showMinimized();
         if (ui->actionMinimizeToTheNotificationArea->isChecked()) {
-            QTimer::singleShot(10, this, SLOT(hide()));
+            m_hiddenToTray = true;
+            QTimer::singleShot(10, this, [this]() { hide(); });
         }
     });
-    connect(s112_minimizedWindow, &QState::exited, [=]() {
+    connect(s112_minimizedWindow, &QState::exited, [this]() {
+        m_hiddenToTray = false;
         this->showNormal();
         if (ui->actionMinimizeToTheNotificationArea->isChecked()) {
             show();
@@ -657,6 +659,7 @@ void MainWindow::changeStatus(int val)
 
         if (this->minimize_on_connect) {
             if (m_trayIcon) {
+                m_hiddenToTray = true;
                 hide();
             } else {
                 this->setWindowState(Qt::WindowMinimized);
@@ -1028,8 +1031,10 @@ fail: // LCA: remote 'fail' label :/
 void MainWindow::closeEvent(QCloseEvent* event)
 {
     if (m_trayIcon && m_trayIcon->isVisible() && ui->actionMinimizeTheApplicationInsteadOfClosing->isChecked()) {
-        this->showMinimized();
+        m_hiddenToTray = true;
+        hide();
         event->ignore();
+        return;
     } else {
         event->accept();
 
@@ -1047,27 +1052,33 @@ void MainWindow::closeEvent(QCloseEvent* event)
 bool MainWindow::event(QEvent* event)
 {
     if (event->type() == QEvent::WindowActivate || event->type() == QEvent::Show || event->type() == QEvent::ApplicationActivate) {
-        QTimer::singleShot(0, this, [this]() {
-            if (!isVisible()) {
-                return;
-            }
-            forceShowAndRepaint();
-        });
+        QTimer::singleShot(0, this, &MainWindow::openMainWindow);
     }
     return QMainWindow::event(event);
+}
+
+void MainWindow::openMainWindow()
+{
+    if (isMinimized() || !isVisible() || m_hiddenToTray) {
+        showNormal();
+        show();
+    } else {
+        show();
+    }
+
+    m_hiddenToTray = false;
+    setWindowState((windowState() & ~Qt::WindowMinimized) | Qt::WindowActive);
+    raise();
+    activateWindow();
+    if (centralWidget()) {
+        centralWidget()->setVisible(true);
+    }
+    forceShowAndRepaint();
 }
 
 void MainWindow::forceShowAndRepaint()
 {
     setUpdatesEnabled(false);
-    if (isMinimized()) {
-        showNormal();
-    } else {
-        show();
-    }
-    setWindowState(windowState() & ~Qt::WindowMinimized | Qt::WindowActive);
-    raise();
-    activateWindow();
     if (centralWidget()) {
         centralWidget()->update();
         centralWidget()->repaint();
@@ -1188,9 +1199,7 @@ void MainWindow::createTrayIcon()
     m_trayIconMenuConnections = new QMenu(this);
     m_trayIconMenu->addMenu(m_trayIconMenuConnections);
     QAction* openWindowAction = new QAction(tr("Open window"), this);
-    connect(openWindowAction, &QAction::triggered, this, [this]() {
-        forceShowAndRepaint();
-    });
+    connect(openWindowAction, &QAction::triggered, this, &MainWindow::openMainWindow);
     m_trayIconMenu->addAction(openWindowAction);
 
     m_disconnectAction = new QAction(tr("Disconnect"), this);

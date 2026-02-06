@@ -118,6 +118,7 @@ private slots:
     void checkForUpdatesDialog();
 
 private:
+    void openMainWindow();
     void forceShowAndRepaint();
     void gotLatestVersion(QNetworkReply *reply);
     void checkLatestVersion() const;
@@ -159,4 +160,6 @@ private:
     QAction* m_minimizeAction;
     QAction* m_restoreAction;
     QAction* m_quitAction;
+
+    bool m_hiddenToTray = false;
 };
