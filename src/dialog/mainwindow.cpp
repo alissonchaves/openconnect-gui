@@ -1046,20 +1046,12 @@ void MainWindow::closeEvent(QCloseEvent* event)
 
 bool MainWindow::event(QEvent* event)
 {
-    if (event->type() == QEvent::WindowActivate || event->type() == QEvent::Show) {
+    if (event->type() == QEvent::WindowActivate || event->type() == QEvent::Show || event->type() == QEvent::ApplicationActivate) {
         QTimer::singleShot(0, this, [this]() {
             if (!isVisible()) {
                 return;
             }
-            if (isMinimized()) {
-                showNormal();
-            }
-            if (centralWidget()) {
-                centralWidget()->update();
-                centralWidget()->repaint();
-            }
-            update();
-            repaint();
+            forceShowAndRepaint();
         });
     }
     return QMainWindow::event(event);
@@ -1067,17 +1059,21 @@ bool MainWindow::event(QEvent* event)
 
 void MainWindow::forceShowAndRepaint()
 {
+    setUpdatesEnabled(false);
     if (isMinimized()) {
         showNormal();
     } else {
         show();
     }
+    setWindowState(windowState() & ~Qt::WindowMinimized | Qt::WindowActive);
     raise();
     activateWindow();
     if (centralWidget()) {
         centralWidget()->update();
         centralWidget()->repaint();
     }
+    setUpdatesEnabled(true);
+    updateGeometry();
     update();
     repaint();
 }
