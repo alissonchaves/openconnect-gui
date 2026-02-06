@@ -91,6 +91,7 @@ public slots:
     void on_disconnectClicked();
 
     void closeEvent(QCloseEvent* event) override;
+    bool event(QEvent* event) override;
 
     void on_actionAbout_triggered();
     void on_actionCheckForUpdates_triggered();
@@ -117,6 +118,7 @@ private slots:
     void checkForUpdatesDialog();
 
 private:
+    void forceShowAndRepaint();
     void gotLatestVersion(QNetworkReply *reply);
     void checkLatestVersion() const;
 

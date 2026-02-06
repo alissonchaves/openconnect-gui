@@ -59,6 +59,7 @@ extern "C" {
 #include <QNetworkAccessManager>
 #include <QProgressDialog>
 #include <QGuiApplication>
+#include <QEvent>
 
 #include <cmath>
 #include <cstdarg>
@@ -113,44 +114,33 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName)
     }
 #endif
 
-    {
-        auto setLink = [](QLabel* label, const QString& url, const QString& text) {
-            label->setText(QStringLiteral("<a href=\"%1\">%2</a>").arg(url, text));
-            label->setOpenExternalLinks(true);
-        };
+    if (ui->aboutTextBrowser) {
+        const QString html = QStringLiteral(
+            "<h2>%1</h2>"
+            "<table>"
+            "<tr><td><b>Version:</b></td><td>%2</td></tr>"
+            "<tr><td><b>Build:</b></td><td>%3</td></tr>"
+            "<tr><td><b>Qt:</b></td><td>Qt %4</td></tr>"
+            "<tr><td><b>OpenConnect:</b></td><td>%5</td></tr>"
+            "<tr><td><b>System:</b></td><td>%6</td></tr>"
+            "<tr><td><b>Architecture:</b></td><td>%7</td></tr>"
+            "</table>"
+            "<br/>"
+            "<a href=\"%8\">GitHub Releases</a><br/>"
+            "<a href=\"%9\">GitHub Issues</a><br/>"
+            "<a href=\"https://github.com/alissonchaves/openconnect-gui/blob/main/LICENSE.txt\">GPLv2+</a>"
+        ).arg(QLatin1String(PRODUCT_NAME_LONG),
+            QLatin1String(PROJECT_VERSION),
+            QLatin1String(appBuildOn),
+            QLatin1String(QT_VERSION_STR),
+            QLatin1String(openconnect_get_version()),
+            QSysInfo::prettyProductName(),
+            QSysInfo::buildCpuArchitecture(),
+            QLatin1String(APP_RELEASES_URL),
+            QLatin1String(APP_ISSUES_URL));
 
-        if (ui->aboutNameLabel) {
-            ui->aboutNameLabel->setText(QLatin1String(PRODUCT_NAME_LONG));
-        }
-        if (ui->aboutVersionLabel) {
-            ui->aboutVersionLabel->setText(QLatin1String(PROJECT_VERSION));
-        }
-        if (ui->aboutBuildLabel) {
-            ui->aboutBuildLabel->setText(QLatin1String(appBuildOn));
-        }
-        if (ui->aboutQtLabel) {
-            ui->aboutQtLabel->setText(tr("Qt %1").arg(QT_VERSION_STR));
-        }
-        if (ui->aboutOpenConnectLabel) {
-            ui->aboutOpenConnectLabel->setText(QLatin1String(openconnect_get_version()));
-        }
-        if (ui->aboutSystemLabel) {
-            ui->aboutSystemLabel->setText(QSysInfo::prettyProductName());
-        }
-        if (ui->aboutArchLabel) {
-            ui->aboutArchLabel->setText(QSysInfo::buildCpuArchitecture());
-        }
-        if (ui->aboutReleasesLabel) {
-            setLink(ui->aboutReleasesLabel, QLatin1String(APP_RELEASES_URL), tr("GitHub Releases"));
-        }
-        if (ui->aboutIssuesLabel) {
-            setLink(ui->aboutIssuesLabel, QLatin1String(APP_ISSUES_URL), tr("GitHub Issues"));
-        }
-        if (ui->aboutLicenseLabel) {
-            setLink(ui->aboutLicenseLabel,
-                QStringLiteral("https://github.com/alissonchaves/openconnect-gui/blob/main/LICENSE.txt"),
-                tr("GPLv2+"));
-        }
+        ui->aboutTextBrowser->setHtml(html);
+        ui->aboutTextBrowser->setOpenExternalLinks(true);
     }
 
     connect(ui->viewLogButton, &QPushButton::clicked,
@@ -181,14 +171,8 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName)
                 return;
             }
             if (isHidden() || isMinimized()) {
-                showNormal();
-            } else {
-                show();
+                forceShowAndRepaint();
             }
-            raise();
-            activateWindow();
-            update();
-            repaint();
         });
 #endif
 
@@ -1058,6 +1042,44 @@ void MainWindow::closeEvent(QCloseEvent* event)
     QMainWindow::closeEvent(event);
 }
 
+bool MainWindow::event(QEvent* event)
+{
+    if (event->type() == QEvent::WindowActivate || event->type() == QEvent::Show) {
+        QTimer::singleShot(0, this, [this]() {
+            if (!isVisible()) {
+                return;
+            }
+            if (isMinimized()) {
+                showNormal();
+            }
+            if (centralWidget()) {
+                centralWidget()->update();
+                centralWidget()->repaint();
+            }
+            update();
+            repaint();
+        });
+    }
+    return QMainWindow::event(event);
+}
+
+void MainWindow::forceShowAndRepaint()
+{
+    if (isMinimized()) {
+        showNormal();
+    } else {
+        show();
+    }
+    raise();
+    activateWindow();
+    if (centralWidget()) {
+        centralWidget()->update();
+        centralWidget()->repaint();
+    }
+    update();
+    repaint();
+}
+
 void MainWindow::request_update_stats()
 {
     char cmd = OC_CMD_STATS;
@@ -1169,9 +1191,7 @@ void MainWindow::createTrayIcon()
     m_trayIconMenu->addMenu(m_trayIconMenuConnections);
     QAction* openWindowAction = new QAction(tr("Open window"), this);
     connect(openWindowAction, &QAction::triggered, this, [this]() {
-        show();
-        raise();
-        activateWindow();
+        forceShowAndRepaint();
     });
     m_trayIconMenu->addAction(openWindowAction);
 
