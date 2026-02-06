@@ -13,6 +13,8 @@ cask "openconnect-gui" do
   auto_updates true
   depends_on arch: :arm64
   depends_on macos: ">= :catalina"
+  depends_on formula: "openconnect"
+  depends_on formula: "openvpn"
 
   app "OpenConnect-GUI.app"
 
