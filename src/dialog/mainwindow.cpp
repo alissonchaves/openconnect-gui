@@ -58,6 +58,7 @@ extern "C" {
 #include <QNetworkReply>
 #include <QNetworkAccessManager>
 #include <QProgressDialog>
+#include <QGuiApplication>
 
 #include <cmath>
 #include <cstdarg>
@@ -132,6 +133,24 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName)
                 qApp->quit();
             }
         });
+
+#ifdef Q_OS_MACOS
+    connect(qApp, &QGuiApplication::applicationStateChanged, this,
+        [this](Qt::ApplicationState state) {
+            if (state != Qt::ApplicationActive) {
+                return;
+            }
+            if (isHidden() || isMinimized()) {
+                showNormal();
+            } else {
+                show();
+            }
+            raise();
+            activateWindow();
+            update();
+            repaint();
+        });
+#endif
 
     connect(blink_timer, &QTimer::timeout,
         this, &MainWindow::blink_ui,
