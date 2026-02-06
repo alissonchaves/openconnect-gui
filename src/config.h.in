@@ -30,7 +30,7 @@
 #cmakedefine PRODUCT_NAME_LONG "@PRODUCT_NAME_LONG@"
 #cmakedefine PROJECT_VERSION "@PROJECT_VERSION@"
 
-// This is used to compare with the latest release on gitlab
+// This is used to compare with the latest release
 // to find out whether a newer version exists.
 #cmakedefine INTERNAL_PROJECT_VERSION "@INTERNAL_PROJECT_VERSION@"
 #cmakedefine PRODUCT_NAME_COPYRIGHT_FULL "@PRODUCT_NAME_COPYRIGHT_FULL@"

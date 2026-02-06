@@ -65,7 +65,7 @@ xattr -dr com.apple.quarantine /Applications/OpenConnect-GUI.app
 ## Other
 - [Creating release package](docs/release.md)
 - [OpenConnect library compilation and dependencies](docs/openconnect.md)
-- [Web page maintenance](https://gitlab.com/openconnect/openconnect-gui-web)
+- [Web page maintenance](https://github.com/alissonchaves/openconnect-gui)
 - [Snapshot builds](docs/snapshots.md)
 - [AppVeyor CI builds](https://ci.appveyor.com/project/nmav/openconnect-gui/history)
 

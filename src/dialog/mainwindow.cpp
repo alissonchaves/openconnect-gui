@@ -437,7 +437,7 @@ void MainWindow::tryCheckLatestVersion()
     time_t now = time(0);
 
     // Check during start up only a time every a few days to avoid
-    // overloading gitlab.
+    // Avoid overloading release API.
     if (last_check_time == 0) {
         OcSettings settings;
         last_check_time = settings.value("Settings/last-check-time").toLongLong();

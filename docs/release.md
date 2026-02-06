@@ -12,7 +12,7 @@ Version string auto=generated on compilation from Git info into following format
 Always check if you have committed all changes or move work-in-progress work into stash!!
 Following steps illustrate how to create application:
 
-    $ git clone https://gitlab.com/openconnect/openconnect-gui
+    $ git clone https://github.com/alissonchaves/openconnect-gui
     $ cd openconnect-gui
 
 To build a release package, review released changes in `CHANGELOG.md`,
@@ -22,9 +22,8 @@ process with target tag:
     $ git checkout main
     $ ./release.sh X.Y.Z
 
-Note that this requires to have a gitlab token with permissions to release
-at ~/.gitlab-token as well as the necessary credentials for
-casper.infradead.org.
+Note that this requires to have a GitHub token with permissions to upload
+release assets, stored at `.github-token` in the repository root.
 
 
 ### Release process
@@ -36,9 +35,8 @@ using development builds to receive notifications).
 After bumping the version and committing, the `release.sh` script
 should be run and this takes care of:
  - Creating a tag
- - Building released packages on gitlab CI
- - Uploading the packages to casper.infradead.org
- - Creating a gitlab release
+ - Building released packages on CI
+ - Creating a GitHub release
  - Copying the relevant changelong entries to release description
 
 ## macOS release artifacts for Homebrew cask
@@ -55,12 +53,11 @@ on the target machine.
 
 Suggested cask strategy:
 
-1. Upload the generated `.zip` to the **GitLab Package Registry**.
-2. If public access to the Generic Registry is not available, use a public
-   `package_files/<id>/download` URL in the cask (note that the ID changes per upload).
+1. Upload the generated `.zip` to the **GitHub Release** assets.
+2. Point the cask URL to the release asset download URL.
 3. Use `depends_on macos: ">= :catalina"` in the cask.
 
-This avoids breakage caused by missing/expired CI artifacts or private uploads.
+This avoids breakage caused by missing/expired CI artifacts.
 
 ### Manual macOS release build + GitHub asset (local)
 
