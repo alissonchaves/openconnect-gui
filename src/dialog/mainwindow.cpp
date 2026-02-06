@@ -1108,6 +1108,14 @@ void MainWindow::createTrayIcon()
 
     m_trayIconMenuConnections = new QMenu(this);
     m_trayIconMenu->addMenu(m_trayIconMenuConnections);
+    QAction* openWindowAction = new QAction(tr("Open window"), this);
+    connect(openWindowAction, &QAction::triggered, this, [this]() {
+        show();
+        raise();
+        activateWindow();
+    });
+    m_trayIconMenu->addAction(openWindowAction);
+
     m_disconnectAction = new QAction(tr("Disconnect"), this);
     m_trayIconMenu->addAction(m_disconnectAction);
     connect(m_disconnectAction, &QAction::triggered,
@@ -1138,10 +1146,6 @@ void MainWindow::iconActivated(QSystemTrayIcon::ActivationReason reason)
         } else {
             showMinimized();
         }
-#else
-        show();
-        raise();
-        activateWindow();
 #endif
         break;
     default:
