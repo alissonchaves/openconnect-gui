@@ -116,19 +116,22 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName)
 
     if (ui->aboutTextBrowser) {
         const QString html = QStringLiteral(
-            "<h2>%1</h2>"
-            "<table>"
-            "<tr><td><b>Version:</b></td><td>%2</td></tr>"
-            "<tr><td><b>Build:</b></td><td>%3</td></tr>"
-            "<tr><td><b>Qt:</b></td><td>Qt %4</td></tr>"
-            "<tr><td><b>OpenConnect:</b></td><td>%5</td></tr>"
-            "<tr><td><b>System:</b></td><td>%6</td></tr>"
-            "<tr><td><b>Architecture:</b></td><td>%7</td></tr>"
+            "<div style=\"font-size:13px;\">"
+            "<h2 style=\"margin-bottom:8px;\">%1</h2>"
+            "<table style=\"border-spacing:8px 4px;\">"
+            "<tr><td><b>Version</b></td><td>%2</td></tr>"
+            "<tr><td><b>Build</b></td><td>%3</td></tr>"
+            "<tr><td><b>Qt</b></td><td>Qt %4</td></tr>"
+            "<tr><td><b>OpenConnect</b></td><td>%5</td></tr>"
+            "<tr><td><b>System</b></td><td>%6</td></tr>"
+            "<tr><td><b>Architecture</b></td><td>%7</td></tr>"
             "</table>"
-            "<br/>"
+            "<div style=\"margin-top:10px;\">"
             "<a href=\"%8\">GitHub Releases</a><br/>"
             "<a href=\"%9\">GitHub Issues</a><br/>"
             "<a href=\"https://github.com/alissonchaves/openconnect-gui/blob/main/LICENSE.txt\">GPLv2+</a>"
+            "</div>"
+            "</div>"
         ).arg(QLatin1String(PRODUCT_NAME_LONG),
             QLatin1String(PROJECT_VERSION),
             QLatin1String(appBuildOn),
@@ -141,6 +144,7 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName)
 
         ui->aboutTextBrowser->setHtml(html);
         ui->aboutTextBrowser->setOpenExternalLinks(true);
+        ui->aboutTextBrowser->setStyleSheet(QStringLiteral("QTextBrowser { padding: 12px; }"));
     }
 
     connect(ui->viewLogButton, &QPushButton::clicked,
@@ -170,9 +174,7 @@ MainWindow::MainWindow(QWidget* parent, bool useTray, const QString profileName)
             if (state != Qt::ApplicationActive) {
                 return;
             }
-            if (isHidden() || isMinimized()) {
-                forceShowAndRepaint();
-            }
+            forceShowAndRepaint();
         });
 #endif
 
