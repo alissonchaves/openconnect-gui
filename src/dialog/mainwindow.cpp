@@ -1138,6 +1138,10 @@ void MainWindow::iconActivated(QSystemTrayIcon::ActivationReason reason)
         } else {
             showMinimized();
         }
+#else
+        show();
+        raise();
+        activateWindow();
 #endif
         break;
     default:
