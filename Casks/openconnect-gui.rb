@@ -18,7 +18,9 @@ cask "openconnect-gui" do
   preflight do
     legacy_paths = [
       "/Applications/OpenConnect-GUI.app",
+      "/Applications/OpenConnectMac.app",
       "#{Dir.home}/Applications/OpenConnect-GUI.app",
+      "#{Dir.home}/Applications/OpenConnectMac.app",
       "#{Dir.home}/Library/Application Support/OpenConnect-GUI Team/OpenConnect-GUI",
       "#{Dir.home}/Library/Application Support/OpenConnect-GUI Team/OpenConnect VPN",
       "#{Dir.home}/Library/Preferences/gui.openconnect-vpn.net.OpenConnect-GUI.plist",
