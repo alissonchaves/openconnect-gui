@@ -1,5 +1,13 @@
 History of user-visible changes.
 
+## [v2.0.0] (2026-08-09)
+- Native SwiftUI/AppKit macOS application;
+- Native OpenConnect and OpenVPN backends;
+- Self-contained ARM64 release bundle;
+- Homebrew cask distribution with automatic update checking;
+- Profile management, notifications, VPN information and selectable logs;
+- DNS, routes and tunnel cleanup on disconnect and application exit.
+
 ## [v1.6.3](https://gitlab.com/openconnect/openconnect-gui/-/tree/main) (unreleased)
 - Limit the auto-generated and user-supplied interface name to the maximum length allowed by libopenconnect (#365, #378)
 - Store username and password for GlobalProtect profiles (#390)
@@ -55,7 +63,7 @@ History of user-visible changes.
 - Invalid routes (#190)
 - macOS tray icons improved for dark/light dock panel (#192)
 
-- update Qt(5.10.1), spdlog(0.16.3)
+- update interface dependencies and spdlog(0.16.3)
 - update (msys2): GnuTLS(3.6.1), p11-kit(0.23.9), stoken(0.92), libproxy(0.4.15), nettle(3.4), lz4(1.8.1.2), libxml2(2.9.7), libidn2(2.0.4)
 
 [Full Changelog](https://gitlab.com/openconnect/openconnect-gui/-/compare/v1.5.2...v1.5.3)
@@ -64,7 +72,7 @@ History of user-visible changes.
 ## [v1.5.2](https://gitlab.com/openconnect/openconnect-gui/-/tags/v1.5.2) (2017-08-07)
 - create a tun interface with the correct MTU (#147, #161)
 - update GnuTLS (3.5.13), stoken (0.91), spdlog (0.13.0), gmp (6.1.2), nettle(3.3)
-- update Qt (5.9.1)
+- update interface dependencies
 - support for non-english interface names (#145)
 - unicode windows home folder name support (#168)
 - enable HiDPI (#171)
@@ -90,7 +98,7 @@ History of user-visible changes.
 
 ## [v1.5.0](https://gitlab.com/openconnect/openconnect-gui/-/tags/v1.5.0) (2017-01-29)
 - better Warning message if there is a Name Mismatch (#135)
-- update build scripts to Qt 5.8
+- update build scripts
 - Initial support for experimental Juniper server (#121, #69)
 - New simple profile setup&connect dialog
 - Simple MacOS installer (#81)
@@ -118,7 +126,7 @@ Known issues:
 
 ## [v1.4.0](https://gitlab.com/openconnect/openconnect-gui/-/tags/v1.4.0) (2016-08-10)
 - updated gnutls(3.4.14), stoken (0.90), gmp(6.1.0), nettle(3.2), p11-kit(0.23.2), zlib (1.2.8), libxml2 (2.9.3)
-- updated TAP-windows(9.21.2), Qt(5.6)
+- updated TAP-windows(9.21.2) and installer dependencies
 - new component based NSIS installer (with optional console client, vcredist/tap drivers)
 - couple of changes, fixes and logging improvements in 'vpnc-script.js'
 - many small UI changes/improvements/fixes everywhere

@@ -9,6 +9,8 @@
 # temporary build folders
 build-release*/
 build*/
+/build-native-core/
+/macos/.build/
 
 
 # temporary...
@@ -21,4 +23,3 @@ _xxx/
 .github-token
 .DS_Store
 *.dSYM
-macdeployqtfix.log

@@ -1,4 +1,0 @@
-build-*MINGW64/
-build-*MINGW32/
-/*.txt
-/*.sha512

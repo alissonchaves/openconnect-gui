@@ -1,0 +1,5 @@
+brew "cmake"
+brew "pkg-config"
+brew "openconnect"
+brew "gnutls"
+brew "openvpn"
