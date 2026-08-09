@@ -23,7 +23,7 @@ checksum="${archive}.sha256"
 
 ditto -c -k --sequesterRsrc --keepParent \
     "$output/OpenConnectMac.app" "$archive"
-shasum -a 256 "$archive" > "$checksum"
+shasum -a 256 "$archive" | sed "s#  $archive$#  $(basename "$archive")#" > "$checksum"
 
 echo "Archive: $archive"
 echo "SHA-256: $(cut -d ' ' -f 1 "$checksum")"
