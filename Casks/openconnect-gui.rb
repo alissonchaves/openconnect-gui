@@ -12,7 +12,6 @@ cask "openconnect-gui" do
   desc "Native macOS client for OpenConnect and OpenVPN"
   homepage "https://gui.openconnect-vpn.net/"
 
-  auto_updates true
   depends_on arch: :arm64
   depends_on macos: :tahoe
 
