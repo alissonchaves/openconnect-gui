@@ -38,7 +38,6 @@ private:
     void apply_split_dns();
     void clear_split_dns();
     void clear_vpn_dns_from_network_services();
-    void capture_network_dns_state();
     std::string find_tunnel_interface() const;
 
     struct openconnect_info* vpninfo_ = nullptr;
@@ -52,8 +51,6 @@ private:
     std::vector<std::string> split_dns_servers_;
     std::vector<std::string> vpn_dns_servers_;
     std::vector<std::string> vpn_dns_domains_;
-    std::map<std::string, std::vector<std::string>> baseline_dns_domains_;
-    std::map<std::string, std::vector<std::string>> baseline_dns_servers_;
     std::string split_dns_interface_;
 };
 

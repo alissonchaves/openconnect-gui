@@ -52,6 +52,7 @@ final class CoreNativeSession {
         let script = Self.locateVPNCScript()
 
         script.withCString { scriptPath in
+          profile.customRoutes.withCString { customRoutes in
             profile.gateway.withCString { gateway in
                 profile.protocolName.withCString { protocolName in
                     profile.username.withCString { username in
@@ -67,7 +68,9 @@ final class CoreNativeSession {
                             disable_udp: 0,
                             dtls_reconnect_timeout: 25,
                             reconnect_timeout: 300,
-                            log_level: -1
+                            log_level: -1,
+                            route_mode: profile.routeMode == "all" ? 1 : (profile.routeMode == "custom" ? 2 : 0),
+                            custom_routes: customRoutes
                         )
                         var callbacks = openconnect_core_callbacks(
                             context: Unmanaged.passUnretained(self).toOpaque(),
@@ -79,6 +82,7 @@ final class CoreNativeSession {
                             handle, &value, &callbacks, &error, UInt32(error.count)) != 0
                         }
                     }
+          }
                 }
             }
         }
@@ -117,7 +121,7 @@ final class CoreNativeSession {
         }
 
         attachPrivilegedPipe(FileHandle(fileDescriptor: descriptor, closeOnDealloc: true),
-            initialInput: profile.username + "\n" + profile.password + "\n")
+            initialInput: profile.username + "\n" + profile.password + "\n" + (profile.routeMode == "all" ? "1" : (profile.routeMode == "custom" ? "2" : "0")) + "\n" + profile.customRoutes.replacingOccurrences(of: "\n", with: "|") + "\n")
         return true
     }
 
@@ -140,7 +144,7 @@ final class CoreNativeSession {
             return false
         }
         attachPrivilegedPipe(FileHandle(fileDescriptor: descriptor, closeOnDealloc: true),
-            initialInput: profile.username + "\n" + profile.password + "\n")
+            initialInput: profile.username + "\n" + profile.password + "\n" + (profile.routeMode == "all" ? "1" : (profile.routeMode == "custom" ? "2" : "0")) + "\n" + profile.customRoutes.replacingOccurrences(of: "\n", with: "|") + "\n")
         return true
     }
 

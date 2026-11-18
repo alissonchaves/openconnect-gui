@@ -94,7 +94,7 @@ struct OpenConnectMac: App {
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                     // Give the privileged helper a chance to tear down the
                     // tunnel and restore DNS before the UI process exits.
-                    model.disconnect()
+                    model.disconnectAll()
                 }
         }
         .windowResizability(.contentSize)
@@ -103,7 +103,7 @@ struct OpenConnectMac: App {
             MenuBarStatusView()
                 .environmentObject(model)
         } label: {
-            TrayShieldIcon(disconnected: model.state != .connected)
+            TrayShieldIcon(activeCount: model.activeProfiles.count)
         }
         .menuBarExtraStyle(.menu)
 
@@ -123,14 +123,19 @@ private enum OpenConnectMetadata {
 }
 
 private struct TrayShieldIcon: View {
-    let disconnected: Bool
+    let activeCount: Int
 
     var body: some View {
-        Image(systemName: disconnected ? "shield.slash" : "shield.fill")
-            .font(.system(size: 17, weight: .semibold))
-            .foregroundStyle(.primary)
-            .frame(width: 20, height: 20)
-        .accessibilityLabel(disconnected ? "VPN disconnected" : "VPN connected")
+        HStack(spacing: 2) {
+            Image(systemName: activeCount == 0 ? "shield.slash" : "shield.fill")
+                .font(.system(size: 17, weight: .semibold))
+            if activeCount > 1 {
+                Text("\(activeCount)")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+            }
+        }
+        .foregroundStyle(.primary)
+        .accessibilityLabel(activeCount == 0 ? "VPN disconnected" : "\(activeCount) VPN connections active")
     }
 }
 
@@ -147,7 +152,7 @@ private struct OpenConnectCommands: Commands {
                         Button("Use This Profile") {
                             model.select(profile: profile)
                         }
-                        .disabled(model.state != .disconnected)
+                        .disabled(model.selectedProfile == profile.name)
 
                         Button("Edit Profile…") {
                             model.requestEdit(profile: profile)
@@ -205,12 +210,27 @@ private struct MenuBarStatusView: View {
     @EnvironmentObject private var model: VPNModel
 
     var body: some View {
-        Text(model.state.title)
+        Text(model.activeProfiles.isEmpty ? model.state.title : "\(model.activeProfiles.count) Active VPN Connection\(model.activeProfiles.count == 1 ? "" : "s")")
             .font(.headline)
 
-        if let profile = model.selectedProfile {
+        if model.activeProfiles.isEmpty, let profile = model.selectedProfile {
             Text(profile)
                 .foregroundStyle(.secondary)
+        }
+
+        if !model.activeProfiles.isEmpty {
+            Menu("Active Connections") {
+                ForEach(model.activeProfiles) { profile in
+                    Menu(profile.name) {
+                        Text(model.state(for: profile.name).title)
+                        Button("Disconnect") { model.disconnect(profileName: profile.name) }
+                    }
+                }
+                if model.activeProfiles.count > 1 {
+                    Divider()
+                    Button("Disconnect All") { model.disconnectAll() }
+                }
+            }
         }
 
         Menu("VPN Profile") {
@@ -222,12 +242,15 @@ private struct MenuBarStatusView: View {
                         Button("Use This Profile") {
                             model.select(profile: profile)
                         }
-                        .disabled(model.state != .disconnected)
+                        .disabled(model.isConnected(profile))
 
                         Button("Connect") {
                             model.connect(profile: profile)
                         }
-                        .disabled(model.state != .disconnected)
+                        .disabled(model.isConnected(profile))
+                        if model.isConnected(profile) {
+                            Button("Disconnect") { model.disconnect(profileName: profile.name) }
+                        }
 
                         Button("Edit Profile…") {
                             model.requestEdit(profile: profile)
@@ -296,6 +319,7 @@ final class VPNModel: ObservableObject {
     @Published private(set) var messages: [String]
     @Published var requestedProfileEdit: VPNProfile? = nil
     private var lastNotificationState: VPNConnectionState
+    private var sleepObserver: NSObjectProtocol?
 
     init(backend: NativeVPNBackend) {
         self.backend = backend
@@ -305,19 +329,31 @@ final class VPNModel: ObservableObject {
         self.details = backend.details
         self.messages = backend.messages
         self.lastNotificationState = backend.state
+        sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            // Clean up tunnel state before the physical network goes away.
+            self?.disconnectAll()
+        }
+    }
+
+    deinit {
+        if let sleepObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(sleepObserver)
+        }
     }
 
     var canConnect: Bool {
-        guard state == .disconnected,
-              let selectedProfile,
+        guard let selectedProfile,
               profiles.contains(where: { $0.name == selectedProfile }) else {
             return false
         }
-        return true
+        return !backend.activeConnections.contains(selectedProfile)
     }
 
     var canDisconnect: Bool {
-        state == .connected || state == .connecting
+        guard let selectedProfile else { return false }
+        return backend.activeConnections.contains(selectedProfile)
     }
 
     func profile(named name: String) -> VPNProfile? {
@@ -325,7 +361,6 @@ final class VPNModel: ObservableObject {
     }
 
     func select(profile: VPNProfile) {
-        guard state == .disconnected else { return }
         selectedProfile = profile.name
         backend.selectedProfile = profile.name
     }
@@ -340,7 +375,7 @@ final class VPNModel: ObservableObject {
     }
 
     func canRemove(profile: VPNProfile) -> Bool {
-        state == .disconnected || profile.name != selectedProfile
+        !backend.activeConnections.contains(profile.name)
     }
 
     func requestEdit(profile: VPNProfile) {
@@ -365,15 +400,35 @@ final class VPNModel: ObservableObject {
     }
 
     func connect(profile: VPNProfile) {
-        guard state == .disconnected else { return }
         select(profile: profile)
-        connect()
+        backend.connect(profile: profile)
+        refresh()
     }
 
     func disconnect() {
         backend.disconnect()
         refresh()
     }
+
+    func disconnect(profileName: String) {
+        backend.disconnect(profileName: profileName)
+        refresh()
+    }
+
+    func disconnectAll() { backend.disconnectAll(); refresh() }
+
+    func isConnected(_ profile: VPNProfile) -> Bool { backend.activeConnections.contains(profile.name) }
+    var activeProfiles: [VPNProfile] {
+        profiles.filter { backend.activeConnections.contains($0.name) }
+    }
+    func details(for profileName: String) -> VPNDetails {
+        backend.connectionDetails[profileName] ?? VPNDetails()
+    }
+    func state(for profileName: String?) -> VPNConnectionState {
+        guard let profileName else { return .disconnected }
+        return backend.state(profileName: profileName)
+    }
+    func canRemove(_ profile: VPNProfile) -> Bool { !backend.activeConnections.contains(profile.name) }
 
     func clearLog() {
         backend.clearLog()

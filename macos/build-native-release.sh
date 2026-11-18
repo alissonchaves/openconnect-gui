@@ -17,13 +17,13 @@ OPENCONNECT_CORE_HELPER="$core_build/openconnect-core-helper" \
 OPENVPN_CORE_HELPER="$core_build/openvpn-core-helper" \
   "$package_root/macos/build-native-app.sh" "$output" release
 
-version="${APP_VERSION:-2.0.0}"
+version="${APP_VERSION:-2.1.0}"
 archive="$(dirname "$output")/openconnect-gui-${version}-macos-arm64.zip"
 checksum="${archive}.sha256"
 
 ditto -c -k --sequesterRsrc --keepParent \
     "$output/OpenConnectMac.app" "$archive"
-shasum -a 256 "$archive" | sed "s#  $archive$#  $(basename "$archive")#" > "$checksum"
+shasum -a 256 "$archive" | awk -v archive_name="$(basename "$archive")" '{print $1 "  " archive_name}' > "$checksum"
 
 echo "Archive: $archive"
 echo "SHA-256: $(cut -d ' ' -f 1 "$checksum")"

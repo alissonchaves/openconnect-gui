@@ -27,6 +27,8 @@ typedef struct openconnect_core_profile {
     int dtls_reconnect_timeout;
     int reconnect_timeout;
     int log_level;
+    int route_mode;
+    const char* custom_routes;
 } openconnect_core_profile;
 
 typedef struct openconnect_core_status {

@@ -6,6 +6,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <sstream>
 
 using openconnect::core::ConnectionState;
 using openconnect::core::EventSink;
@@ -147,6 +148,13 @@ extern "C" int openconnect_core_session_connect(openconnect_core_session* sessio
     value.dtls_reconnect_timeout = profile->dtls_reconnect_timeout;
     value.reconnect_timeout = profile->reconnect_timeout;
     value.log_level = profile->log_level;
+    value.route_policy = profile->route_mode;
+    std::string routes = string_or_empty(profile->custom_routes);
+    std::istringstream route_stream(routes);
+    std::string route;
+    while (std::getline(route_stream, route)) {
+        if (!route.empty()) value.routes.push_back({route, "", ""});
+    }
 
     session->events = std::make_unique<CallbackSink>(callbacks);
     std::string message;

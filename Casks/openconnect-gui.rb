@@ -3,8 +3,8 @@ require "fileutils"
 cask "openconnect-gui" do
   arch arm: "arm64"
 
-  version "2.0.0"
-  sha256 "7203edce9f44105c3d5793d2d168d4767530a6220a19cfbf848bd846ba650b5a"
+  version "2.1.0"
+  sha256 "540be342f2b5141a77c2bf3a928b65c6a3463a28be86fe2d3824c83507aa0a14"
 
   url "https://github.com/alissonchaves/openconnect-gui/releases/download/v#{version}/openconnect-gui-#{version}-macos-#{arch}.zip",
       verified: "github.com/alissonchaves/openconnect-gui/"

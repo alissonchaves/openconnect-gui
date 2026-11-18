@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import Network
 import OpenConnectCoreC
 
 enum VPNConnectionState: Equatable {
@@ -39,6 +40,8 @@ struct VPNProfile: Identifiable, Equatable {
     var username: String = ""
     var password: String = ""
     var openvpnConfigPath: String = ""
+    var routeMode: String = "server"
+    var customRoutes: String = ""
 }
 
 struct VPNProvider: Identifiable, Hashable {
@@ -79,10 +82,16 @@ protocol NativeVPNBackend: AnyObject {
     var state: VPNConnectionState { get }
     var selectedProfile: String? { get set }
     var details: VPNDetails { get }
+    var connectionDetails: [String: VPNDetails] { get }
     var messages: [String] { get }
+    var activeConnections: Set<String> { get }
+    func state(profileName: String) -> VPNConnectionState
 
     func connect()
+    func connect(profile: VPNProfile)
     func disconnect()
+    func disconnect(profileName: String)
+    func disconnectAll()
     func refresh()
     func clearLog()
     func save(profile: VPNProfile, replacing originalName: String?)
@@ -99,11 +108,15 @@ final class PreviewVPNBackend: NativeVPNBackend {
     var state: VPNConnectionState = .disconnected
     var selectedProfile: String? = "vpn.example.com"
     var details = VPNDetails()
+    var connectionDetails: [String: VPNDetails] = [:]
     var messages = ["Native macOS interface initialized"]
+    var activeConnections: Set<String> = []
+    func state(profileName: String) -> VPNConnectionState { state }
 
     func connect() {
         messages.append("Connection bridge is not enabled in this preview")
     }
+    func connect(profile: VPNProfile) { connect() }
 
     func refresh() {}
 
@@ -112,6 +125,8 @@ final class PreviewVPNBackend: NativeVPNBackend {
     func disconnect() {
         messages.append("Connection bridge is not enabled in this preview")
     }
+    func disconnect(profileName: String) { disconnect() }
+    func disconnectAll() { disconnect() }
 
     func save(profile: VPNProfile, replacing originalName: String?) {
         if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
@@ -138,13 +153,17 @@ private struct NativeStoredProfile: Codable {
     var protocolName: String
     var username: String
     var openvpnConfigPath: String
+    var routeMode: String
+    var customRoutes: String
 
-    init(name: String, gateway: String, protocolName: String, username: String, openvpnConfigPath: String = "") {
+    init(name: String, gateway: String, protocolName: String, username: String, openvpnConfigPath: String = "", routeMode: String = "server", customRoutes: String = "") {
         self.name = name
         self.gateway = gateway
         self.protocolName = protocolName
         self.username = username
         self.openvpnConfigPath = openvpnConfigPath
+        self.routeMode = routeMode
+        self.customRoutes = customRoutes
     }
 
     init(from decoder: Decoder) throws {
@@ -154,6 +173,8 @@ private struct NativeStoredProfile: Codable {
         protocolName = try container.decode(String.self, forKey: .protocolName)
         username = try container.decode(String.self, forKey: .username)
         openvpnConfigPath = try container.decodeIfPresent(String.self, forKey: .openvpnConfigPath) ?? ""
+        routeMode = try container.decodeIfPresent(String.self, forKey: .routeMode) ?? "server"
+        customRoutes = try container.decodeIfPresent(String.self, forKey: .customRoutes) ?? ""
     }
 }
 
@@ -215,19 +236,33 @@ final class CoreVPNBackend: NativeVPNBackend {
             } else {
                 UserDefaults.standard.removeObject(forKey: Self.selectedProfileKey)
             }
+            details = selectedProfile.flatMap { connectionDetails[$0] } ?? VPNDetails()
+            activeVPN = selectedProfile.map { connectionStates[$0] == .connected } ?? false
+            if activeVPN { startCounterPolling() } else { stopCounterPolling() }
         }
     }
     var details = VPNDetails()
+    private(set) var connectionDetails: [String: VPNDetails] = [:]
     private(set) var messages: [String] = []
 
-    private let session = CoreNativeSession()
-    private var previousCounterDate: Date?
-    private var previousUploaded: UInt64 = 0
-    private var previousDownloaded: UInt64 = 0
-    private var displayedUploaded: UInt64 = 0
-    private var displayedDownloaded: UInt64 = 0
+    private var sessions: [String: CoreNativeSession] = [:]
+    private var connectionStates: [String: VPNConnectionState] = [:]
+    var activeConnections: Set<String> { Set(sessions.keys) }
+    func state(profileName: String) -> VPNConnectionState { connectionStates[profileName] ?? .disconnected }
     private var activeVPN = false
     private var counterTimer: Timer?
+    private var healthTimer: Timer?
+    private let probeQueue = DispatchQueue(label: "net.openconnect-vpn.server-probes")
+    private var probesInFlight: Set<String> = []
+    private var failedProbes: [String: Int] = [:]
+    private var routeFingerprints: [String: String] = [:]
+    private var recoveryTimers: [String: DispatchWorkItem] = [:]
+    private struct TrafficSample {
+        let date: Date
+        let uploaded: UInt64
+        let downloaded: UInt64
+    }
+    private var trafficSamples: [String: TrafficSample] = [:]
 
     private func formatBitRate(_ bitsPerSecond: Double) -> String {
         guard bitsPerSecond > 0 else { return "0 bit/s" }
@@ -249,31 +284,6 @@ final class CoreVPNBackend: NativeVPNBackend {
         return String(format: "%.3f %@", value, units[unit])
     }
 
-    private func updateDisplayedCounters(uploaded: UInt64, downloaded: UInt64, state: VPNConnectionState) {
-        let effectiveUploaded = max(displayedUploaded, uploaded)
-        let effectiveDownloaded = max(displayedDownloaded, downloaded)
-        displayedUploaded = effectiveUploaded
-        displayedDownloaded = effectiveDownloaded
-        details.upload = formatByteCount(effectiveUploaded)
-        details.download = formatByteCount(effectiveDownloaded)
-        let now = Date()
-        if let previousDate = previousCounterDate, state == .connected {
-            let elapsed = now.timeIntervalSince(previousDate)
-            if elapsed > 0.05 {
-                let uploadedDelta = effectiveUploaded >= previousUploaded ? effectiveUploaded - previousUploaded : 0
-                let downloadedDelta = effectiveDownloaded >= previousDownloaded ? effectiveDownloaded - previousDownloaded : 0
-                details.uploadSpeed = formatBitRate(Double(uploadedDelta) * 8.0 / elapsed)
-                details.downloadSpeed = formatBitRate(Double(downloadedDelta) * 8.0 / elapsed)
-            }
-        } else if state != .connected {
-            details.uploadSpeed = ""
-            details.downloadSpeed = ""
-        }
-        previousCounterDate = now
-        previousUploaded = effectiveUploaded
-        previousDownloaded = effectiveDownloaded
-    }
-
     private func startCounterPolling() {
         guard activeVPN, counterTimer == nil else { return }
         counterTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -287,8 +297,9 @@ final class CoreVPNBackend: NativeVPNBackend {
     }
 
     private func pollTunnelCounters() {
-        guard activeVPN, state == .connected else { return }
-        let address = details.ipv4
+        guard activeVPN, let profileName = selectedProfile,
+              connectionStates[profileName] == .connected else { return }
+        let address = connectionDetails[profileName]?.ipv4 ?? details.ipv4
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self, !address.isEmpty else { return }
             var interfaceBuffer = Array(repeating: CChar(0), count: 32)
@@ -300,8 +311,8 @@ final class CoreVPNBackend: NativeVPNBackend {
             guard found != 0,
                   native_interface_counters(&interfaceBuffer, &received, &sent) != 0 else { return }
             DispatchQueue.main.async {
-                guard self.state == .connected else { return }
-                self.updateDisplayedCounters(uploaded: sent, downloaded: received, state: .connected)
+                guard self.connectionStates[profileName] == .connected else { return }
+                self.updateTrafficDetails(profileName: profileName, uploaded: sent, downloaded: received)
             }
         }
     }
@@ -313,35 +324,126 @@ final class CoreVPNBackend: NativeVPNBackend {
         selectedProfile = profiles.contains(where: { $0.name == savedSelection })
             ? savedSelection
             : profiles.first?.name
-        session.onStatus = { [weak self] status in
-            guard let self else { return }
-            DispatchQueue.main.async {
-                self.state = status.state
-                self.details.ipv4 = status.ipv4
-                self.details.ipv6 = status.ipv6
-                self.details.dns = status.dns
-                self.details.dnsSearch = status.dnsSearch
-                self.details.cipher = status.cipher
-                self.details.dtlsCipher = status.dtlsCipher
-                if status.state == .connected { self.startCounterPolling() }
-                if status.state != .connected { self.stopCounterPolling() }
-                self.updateDisplayedCounters(uploaded: status.uploaded, downloaded: status.downloaded, state: status.state)
-            }
-        }
-        session.onLog = { [weak self] message in
-            DispatchQueue.main.async { self?.messages.append(message) }
-        }
         if profiles.isEmpty {
             messages = ["Create a VPN profile to connect"]
         }
+        healthTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+            self?.checkActiveServers()
+        }
+    }
+
+    private func makeSession(for profile: VPNProfile) -> CoreNativeSession {
+        let session = CoreNativeSession()
+        session.onStatus = { [weak self] status in
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let previousState = self.connectionStates[profile.name]
+                self.connectionStates[profile.name] = status.state
+                self.updateConnectionDetails(profileName: profile.name, status: status)
+                if status.state == .connecting && previousState == .connected {
+                    let recovery = DispatchWorkItem { [weak self] in
+                        guard let self, self.connectionStates[profile.name] == .connecting else { return }
+                        self.messages.append("[\(profile.name)] VPN did not recover after the network interruption; disconnecting to restore routes and DNS")
+                        self.disconnect(profileName: profile.name)
+                    }
+                    self.recoveryTimers[profile.name]?.cancel()
+                    self.recoveryTimers[profile.name] = recovery
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: recovery)
+                } else if status.state == .connected || status.state == .disconnected {
+                    self.recoveryTimers[profile.name]?.cancel()
+                    self.recoveryTimers.removeValue(forKey: profile.name)
+                }
+                if self.selectedProfile == profile.name {
+                    self.details = self.connectionDetails[profile.name] ?? VPNDetails()
+                }
+                self.state = self.connectionStates.values.contains(.connecting) ? .connecting :
+                    (self.connectionStates.values.contains(.connected) ? .connected :
+                    (self.connectionStates.values.contains(.disconnecting) ? .disconnecting : .disconnected))
+                if status.state == .connected, self.selectedProfile == profile.name { self.activeVPN = true; self.startCounterPolling() }
+                if status.state == .connected {
+                    self.routeFingerprints[profile.name] = self.physicalRouteFingerprint(for: profile)
+                }
+                if status.state == .disconnected {
+                    self.sessions.removeValue(forKey: profile.name)
+                    self.connectionStates.removeValue(forKey: profile.name)
+                    self.connectionDetails.removeValue(forKey: profile.name)
+                    self.trafficSamples.removeValue(forKey: profile.name)
+                    self.failedProbes.removeValue(forKey: profile.name)
+                    self.routeFingerprints.removeValue(forKey: profile.name)
+                    self.recoveryTimers[profile.name]?.cancel()
+                    self.recoveryTimers.removeValue(forKey: profile.name)
+                    if self.selectedProfile == profile.name {
+                        self.details = VPNDetails()
+                        self.activeVPN = false
+                        self.stopCounterPolling()
+                    }
+                }
+            }
+        }
+        session.onLog = { [weak self] message in
+            DispatchQueue.main.async { self?.messages.append("[\(profile.name)] \(message)") }
+        }
+        return session
+    }
+
+    private func updateConnectionDetails(profileName: String, status: CoreSessionStatus) {
+        var value = connectionDetails[profileName] ?? VPNDetails()
+        value.ipv4 = status.ipv4
+        value.ipv6 = status.ipv6
+        value.dns = status.dns
+        value.dnsSearch = status.dnsSearch
+        value.cipher = status.cipher
+        value.dtlsCipher = status.dtlsCipher
+        value.upload = formatByteCount(status.uploaded)
+        value.download = formatByteCount(status.downloaded)
+
+        let now = Date()
+        if status.state == .connected, let previous = trafficSamples[profileName] {
+            let elapsed = now.timeIntervalSince(previous.date)
+            if elapsed > 0.05 {
+                let uploadedDelta = status.uploaded >= previous.uploaded ? status.uploaded - previous.uploaded : 0
+                let downloadedDelta = status.downloaded >= previous.downloaded ? status.downloaded - previous.downloaded : 0
+                value.uploadSpeed = formatBitRate(Double(uploadedDelta) * 8.0 / elapsed)
+                value.downloadSpeed = formatBitRate(Double(downloadedDelta) * 8.0 / elapsed)
+            }
+        } else {
+            value.uploadSpeed = ""
+            value.downloadSpeed = ""
+        }
+        trafficSamples[profileName] = TrafficSample(date: now, uploaded: status.uploaded, downloaded: status.downloaded)
+        connectionDetails[profileName] = value
+    }
+
+    private func updateTrafficDetails(profileName: String, uploaded: UInt64, downloaded: UInt64) {
+        var value = connectionDetails[profileName] ?? VPNDetails()
+        value.upload = formatByteCount(uploaded)
+        value.download = formatByteCount(downloaded)
+        let now = Date()
+        if let previous = trafficSamples[profileName], connectionStates[profileName] == .connected {
+            let elapsed = now.timeIntervalSince(previous.date)
+            if elapsed > 0.05 {
+                let uploadedDelta = uploaded >= previous.uploaded ? uploaded - previous.uploaded : 0
+                let downloadedDelta = downloaded >= previous.downloaded ? downloaded - previous.downloaded : 0
+                value.uploadSpeed = formatBitRate(Double(uploadedDelta) * 8.0 / elapsed)
+                value.downloadSpeed = formatBitRate(Double(downloadedDelta) * 8.0 / elapsed)
+            }
+        }
+        trafficSamples[profileName] = TrafficSample(date: now, uploaded: uploaded, downloaded: downloaded)
+        connectionDetails[profileName] = value
+        if selectedProfile == profileName { details = value }
     }
 
     func connect() {
-        guard let selectedProfile,
-              var profile = profiles.first(where: { $0.name == selectedProfile }) else {
+        guard let selectedProfile, let profile = profiles.first(where: { $0.name == selectedProfile }) else {
             messages.append("Select a VPN profile first")
             return
         }
+        connect(profile: profile)
+    }
+
+    func connect(profile sourceProfile: VPNProfile) {
+        guard sessions[sourceProfile.name] == nil else { return }
+        var profile = sourceProfile
         // Do not unlock every Keychain item while the app is starting. Load
         // only the credentials needed by the profile the user connects to.
         if !profile.username.isEmpty && profile.password.isEmpty {
@@ -351,10 +453,13 @@ final class CoreVPNBackend: NativeVPNBackend {
             }
         }
         state = .connecting
+        let session = makeSession(for: profile)
+        sessions[profile.name] = session
+        connectionStates[profile.name] = .connecting
+        connectionDetails[profile.name] = VPNDetails()
+        trafficSamples.removeValue(forKey: profile.name)
+        failedProbes[profile.name] = 0
         activeVPN = true
-        displayedUploaded = 0
-        displayedDownloaded = 0
-        previousCounterDate = nil
         DispatchQueue.global(qos: .userInitiated).async { [session] in
             guard session.connect(profile: profile) else { return }
             session.run()
@@ -362,9 +467,118 @@ final class CoreVPNBackend: NativeVPNBackend {
     }
 
     func disconnect() {
+        guard let selectedProfile else { return }
+        disconnect(profileName: selectedProfile)
+    }
+
+    func disconnect(profileName: String) {
         state = .disconnecting
+        connectionStates[profileName] = .disconnecting
+        recoveryTimers[profileName]?.cancel()
+        recoveryTimers.removeValue(forKey: profileName)
+        if selectedProfile == profileName { stopCounterPolling() }
+        sessions[profileName]?.disconnect()
+    }
+
+    func disconnectAll() {
         stopCounterPolling()
-        session.disconnect()
+        for session in sessions.values { session.disconnect() }
+        state = .disconnecting
+    }
+
+    private func checkActiveServers() {
+        for profile in profiles where sessions[profile.name] != nil && connectionStates[profile.name] == .connected {
+            if let fingerprint = physicalRouteFingerprint(for: profile) {
+                if let previous = routeFingerprints[profile.name], previous != fingerprint {
+                    messages.append("[\(profile.name)] Network route changed; disconnecting to clean up the old tunnel")
+                    disconnect(profileName: profile.name)
+                    continue
+                }
+                routeFingerprints[profile.name] = fingerprint
+            }
+            guard !probesInFlight.contains(profile.name),
+                  let endpoint = serverEndpoint(for: profile, requireTCP: true),
+                  let port = NWEndpoint.Port(rawValue: endpoint.port) else { continue }
+            probesInFlight.insert(profile.name)
+            let connection = NWConnection(host: NWEndpoint.Host(endpoint.host), port: port, using: .tcp)
+            var completed = false
+            func finish(_ reachable: Bool) {
+                guard !completed else { return }
+                completed = true
+                connection.cancel()
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.probesInFlight.remove(profile.name)
+                    guard self.sessions[profile.name] != nil else { return }
+                    if reachable {
+                        self.failedProbes[profile.name] = 0
+                    } else {
+                        let failures = (self.failedProbes[profile.name] ?? 0) + 1
+                        self.failedProbes[profile.name] = failures
+                        self.messages.append("[\(profile.name)] VPN server probe failed (\(failures)/3)")
+                        if failures >= 3 {
+                            self.messages.append("[\(profile.name)] Server is unreachable; disconnecting to restore network routes and DNS")
+                            self.disconnect(profileName: profile.name)
+                        }
+                    }
+                }
+            }
+            connection.stateUpdateHandler = { state in
+                switch state {
+                case .ready: finish(true)
+                case .failed, .cancelled: finish(false)
+                default: break
+                }
+            }
+            connection.start(queue: probeQueue)
+            probeQueue.asyncAfter(deadline: .now() + 5) { finish(false) }
+        }
+    }
+
+    private func physicalRouteFingerprint(for profile: VPNProfile) -> String? {
+        guard let endpoint = serverEndpoint(for: profile) else { return nil }
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/sbin/route")
+        process.arguments = ["-n", "get", endpoint.host]
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return nil }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0,
+              let text = String(data: data, encoding: .utf8) else { return nil }
+        let route = text.split(whereSeparator: \.isNewline).compactMap { line -> String? in
+            let fields = line.split(separator: ":", maxSplits: 1).map(String.init)
+            guard fields.count == 2 else { return nil }
+            let key = fields[0].trimmingCharacters(in: .whitespaces)
+            guard key == "gateway" || key == "interface" else { return nil }
+            return "\(key)=\(fields[1].trimmingCharacters(in: .whitespaces))"
+        }
+        return route.count == 2 ? route.joined(separator: ";") : nil
+    }
+
+    private func serverEndpoint(for profile: VPNProfile, requireTCP: Bool = false) -> (host: String, port: UInt16)? {
+        if profile.protocolName.caseInsensitiveCompare("openvpn") == .orderedSame {
+            guard let config = try? String(contentsOfFile: profile.openvpnConfigPath, encoding: .utf8) else { return nil }
+            var usesTCP = false
+            var remote: (String, UInt16)?
+            for rawLine in config.split(whereSeparator: \.isNewline) {
+                let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !line.isEmpty, !line.hasPrefix("#"), !line.hasPrefix(";") else { continue }
+                let fields = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
+                if fields.first?.lowercased() == "proto", fields.count > 1 {
+                    usesTCP = fields[1].lowercased().contains("tcp")
+                } else if fields.count >= 2, fields[0].lowercased() == "remote", remote == nil {
+                    let port = fields.count > 2 ? UInt16(fields[2]) ?? 1194 : 1194
+                    remote = (fields[1].trimmingCharacters(in: CharacterSet(charactersIn: "[]")), port)
+                }
+            }
+            return requireTCP && !usesTCP ? nil : remote
+        }
+        let raw = profile.gateway.contains("://") ? profile.gateway : "https://\(profile.gateway)"
+        guard let components = URLComponents(string: raw), let host = components.host else { return nil }
+        return (host, UInt16(components.port ?? 443))
     }
 
     func refresh() {
@@ -381,7 +595,8 @@ final class CoreVPNBackend: NativeVPNBackend {
             protocolName: profile.protocolName,
             username: profile.username,
             password: profile.password,
-            openvpnConfigPath: profile.openvpnConfigPath
+            openvpnConfigPath: profile.openvpnConfigPath,
+            routeMode: profile.routeMode, customRoutes: profile.customRoutes
         )
         profiles.removeAll { $0.name == originalName || $0.name == cleaned.name }
         profiles.append(cleaned)
@@ -418,14 +633,14 @@ final class CoreVPNBackend: NativeVPNBackend {
         return values.map {
             VPNProfile(name: $0.name, gateway: $0.gateway, protocolName: $0.protocolName.lowercased(),
                         username: $0.username, password: "",
-                        openvpnConfigPath: $0.openvpnConfigPath)
+                        openvpnConfigPath: $0.openvpnConfigPath, routeMode: $0.routeMode, customRoutes: $0.customRoutes)
         }
     }
 
     private static func saveProfiles(_ profiles: [VPNProfile]) {
         let values = profiles.map {
             NativeStoredProfile(name: $0.name, gateway: $0.gateway, protocolName: $0.protocolName,
-                                username: $0.username, openvpnConfigPath: $0.openvpnConfigPath)
+                                username: $0.username, openvpnConfigPath: $0.openvpnConfigPath, routeMode: $0.routeMode, customRoutes: $0.customRoutes)
         }
         guard let data = try? JSONEncoder().encode(values) else { return }
         UserDefaults.standard.set(data, forKey: profilesKey)

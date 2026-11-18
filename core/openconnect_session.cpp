@@ -12,6 +12,7 @@
 #include <sstream>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 
 namespace openconnect::core {
 
@@ -75,7 +76,6 @@ bool OpenConnectSession::connect(const Profile& profile, EventSink& events, std:
     vpn_dns_servers_.clear();
     vpn_dns_domains_.clear();
     split_dns_interface_.clear();
-    capture_network_dns_state();
     notify_status(ConnectionState::connecting);
 
     if (!configure(profile, error)) {
@@ -322,55 +322,6 @@ static std::string run_command(const std::string& command)
     return result;
 }
 
-void OpenConnectSession::capture_network_dns_state()
-{
-    baseline_dns_domains_.clear();
-    baseline_dns_servers_.clear();
-    const std::string output = run_command("/usr/sbin/scutil --dns");
-    std::istringstream lines(output);
-    std::string line;
-    std::string interface_name;
-    std::vector<std::string> servers;
-    std::vector<std::string> domains;
-    auto flush = [&] {
-        if (!interface_name.empty()) {
-            baseline_dns_servers_[interface_name] = servers;
-            baseline_dns_domains_[interface_name] = domains;
-        }
-        interface_name.clear();
-        servers.clear();
-        domains.clear();
-    };
-    while (std::getline(lines, line)) {
-        if (line.rfind("resolver #", 0) == 0) flush();
-        const auto nameserver = line.find("nameserver[");
-        if (nameserver != std::string::npos) {
-            const auto colon = line.find(':', nameserver);
-            if (colon != std::string::npos) {
-                const std::string value = line.substr(colon + 1);
-                const auto first = value.find_first_not_of(' ');
-                if (first != std::string::npos) servers.push_back(value.substr(first));
-            }
-        }
-        const auto search = line.find("search domain[");
-        if (search != std::string::npos) {
-            const auto colon = line.find(':', search);
-            if (colon != std::string::npos) {
-                const std::string value = line.substr(colon + 1);
-                const auto first = value.find_first_not_of(' ');
-                if (first != std::string::npos) domains.push_back(value.substr(first));
-            }
-        }
-        const auto index = line.find("if_index");
-        if (index != std::string::npos) {
-            const auto open = line.find('(', index);
-            const auto close = line.find(')', open);
-            if (open != std::string::npos && close != std::string::npos) interface_name = line.substr(open + 1, close - open - 1);
-        }
-    }
-    flush();
-}
-
 static std::string shell_quote(const std::string& value)
 {
     std::string quoted = "'";
@@ -527,11 +478,7 @@ void OpenConnectSession::clear_vpn_dns_from_network_services()
         std::system(dns_command.c_str());
 
         std::vector<std::string> kept_domains;
-        const auto baseline_domains = baseline_dns_domains_.find(device);
-        const auto& source_domains = baseline_domains != baseline_dns_domains_.end()
-            ? baseline_domains->second
-            : state.domains;
-        for (const auto& domain : source_domains) {
+        for (const auto& domain : state.domains) {
             if (std::find(vpn_dns_domains_.begin(), vpn_dns_domains_.end(), domain) == vpn_dns_domains_.end()) kept_domains.push_back(domain);
         }
         std::string domain_command = "/usr/sbin/networksetup -setsearchdomains " + shell_quote(service->second);
@@ -628,6 +575,48 @@ void OpenConnectSession::setup_tun(void* userdata)
     const char* script = session->profile_.vpnc_script.empty()
         ? "/opt/homebrew/etc/vpnc/vpnc-script"
         : session->profile_.vpnc_script.c_str();
+    if (session->profile_.route_policy != 0) {
+        // The bundled vpnc-script consumes the same split-include variables
+        // for server routes and user-selected routes. It also adds a host
+        // route for VPNGATEWAY before changing the default route.
+        std::vector<std::pair<std::string, int>> routes;
+        if (session->profile_.route_policy == 1) {
+            routes.emplace_back("0.0.0.0", 0);
+            setenv("CISCO_IPV6_SPLIT_INC", "1", 1);
+            setenv("CISCO_IPV6_SPLIT_INC_0_ADDR", "::", 1);
+            setenv("CISCO_IPV6_SPLIT_INC_0_MASKLEN", "0", 1);
+        } else {
+            unsetenv("CISCO_IPV6_SPLIT_INC");
+            unsetenv("CISCO_IPV6_SPLIT_INC_0_ADDR");
+            unsetenv("CISCO_IPV6_SPLIT_INC_0_MASKLEN");
+            for (const auto& item : session->profile_.routes) {
+                const auto slash = item.destination.find('/');
+                const std::string address = item.destination.substr(0, slash);
+                int prefix = 32;
+                if (slash != std::string::npos) {
+                    try { prefix = std::stoi(item.destination.substr(slash + 1)); }
+                    catch (...) { continue; }
+                }
+                in_addr parsed{};
+                if (prefix < 0 || prefix > 32 || inet_pton(AF_INET, address.c_str(), &parsed) != 1) continue;
+                routes.emplace_back(address, prefix);
+            }
+        }
+        setenv("CISCO_SPLIT_INC", std::to_string(routes.size()).c_str(), 1);
+        for (int i = 0; i < 256; ++i) {
+            const auto key = "CISCO_SPLIT_INC_" + std::to_string(i) + "_";
+            unsetenv((key + "ADDR").c_str()); unsetenv((key + "MASK").c_str()); unsetenv((key + "MASKLEN").c_str());
+        }
+        for (size_t i = 0; i < routes.size(); ++i) {
+            const int prefix = routes[i].second;
+            const std::uint32_t mask = prefix == 0 ? 0 : htonl(0xffffffffu << (32 - prefix));
+            char mask_text[INET_ADDRSTRLEN]{}; inet_ntop(AF_INET, &mask, mask_text, sizeof(mask_text));
+            const auto key = "CISCO_SPLIT_INC_" + std::to_string(i) + "_";
+            setenv((key + "ADDR").c_str(), routes[i].first.c_str(), 1);
+            setenv((key + "MASK").c_str(), mask_text, 1);
+            setenv((key + "MASKLEN").c_str(), std::to_string(prefix).c_str(), 1);
+        }
+    }
     if (openconnect_setup_tun_device(session->vpninfo_, script, nullptr) != 0) {
         session->setup_failed_.store(true);
         session->disconnect_requested_.store(true);

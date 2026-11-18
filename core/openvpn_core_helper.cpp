@@ -11,6 +11,7 @@
 #include <thread>
 #include <array>
 #include <algorithm>
+#include <arpa/inet.h>
 #include <utility>
 #include <vector>
 #include <mutex>
@@ -179,6 +180,25 @@ std::vector<std::string> configured_openvpn_remotes(const char* config)
     return remotes;
 }
 
+bool configured_openvpn_keepalive(const char* config)
+{
+    FILE* file = std::fopen(config, "r");
+    if (file == nullptr) return false;
+    char line[1024];
+    bool configured = false;
+    while (std::fgets(line, sizeof(line), file) != nullptr) {
+        std::istringstream fields(line);
+        std::string key;
+        fields >> key;
+        if (key == "keepalive" || key == "ping-restart") {
+            configured = true;
+            break;
+        }
+    }
+    std::fclose(file);
+    return configured;
+}
+
 std::string shell_output(const std::string& command)
 {
     FILE* pipe = popen(command.c_str(), "r");
@@ -201,58 +221,6 @@ std::string shell_quote(const std::string& value)
     }
     quoted += "'";
     return quoted;
-}
-
-struct NetworkDNSState {
-    std::string service;
-    std::vector<std::string> servers;
-    std::vector<std::string> domains;
-};
-
-std::vector<std::string> networksetup_values(const std::string& command)
-{
-    std::vector<std::string> values;
-    const std::string output = shell_output(command);
-    if (output.find("There aren't any") != std::string::npos) return values;
-    std::istringstream lines(output);
-    std::string value;
-    while (std::getline(lines, value)) {
-        while (!value.empty() && (value.back() == '\r' || value.back() == '\n' || value.back() == ' ')) value.pop_back();
-        if (!value.empty()) values.push_back(value);
-    }
-    return values;
-}
-
-std::vector<NetworkDNSState> capture_network_dns_state()
-{
-    std::vector<NetworkDNSState> state;
-    std::istringstream services(shell_output("/usr/sbin/networksetup -listallnetworkservices"));
-    std::string service;
-    while (std::getline(services, service)) {
-        while (!service.empty() && (service.back() == '\r' || service.back() == '\n')) service.pop_back();
-        if (service.empty() || service.find("An asterisk") != std::string::npos || service.front() == '*') continue;
-        NetworkDNSState entry;
-        entry.service = service;
-        entry.servers = networksetup_values("/usr/sbin/networksetup -getdnsservers " + shell_quote(service));
-        entry.domains = networksetup_values("/usr/sbin/networksetup -getsearchdomains " + shell_quote(service));
-        state.push_back(std::move(entry));
-    }
-    return state;
-}
-
-void restore_network_dns_state(const std::vector<NetworkDNSState>& state)
-{
-    for (const auto& entry : state) {
-        std::string dns = "/usr/sbin/networksetup -setdnsservers " + shell_quote(entry.service);
-        if (entry.servers.empty()) dns += " Empty";
-        else for (const auto& server : entry.servers) dns += " " + shell_quote(server);
-        std::system(dns.c_str());
-
-        std::string domains = "/usr/sbin/networksetup -setsearchdomains " + shell_quote(entry.service);
-        if (entry.domains.empty()) domains += " Empty";
-        else for (const auto& domain : entry.domains) domains += " " + shell_quote(domain);
-        std::system(domains.c_str());
-    }
 }
 
 std::pair<std::string, std::string> interface_addresses(const std::string& interface_name)
@@ -420,9 +388,13 @@ void clear_tunnel_dns(const std::string& interface_name)
 
 void clear_all_tunnel_dns()
 {
-    // The interface may already have been destroyed when cleanup runs. In
-    // that case scanning ifconfig cannot find it, so enumerate the dynamic
-    // store keys themselves and remove every key owned by this helper.
+    // Helpers for simultaneous tunnels share the dynamic store namespace.
+    // Preserve DNS entries for live tun devices and remove only orphaned
+    // entries left behind after a helper or interface disappeared.
+    std::vector<std::string> live_interfaces;
+    std::istringstream interfaces(shell_output("/sbin/ifconfig -l"));
+    std::string interface_name;
+    while (interfaces >> interface_name) live_interfaces.push_back(interface_name);
     const std::string keys = shell_output("printf 'list\\nquit\\n' | /usr/sbin/scutil");
     std::istringstream values(keys);
     std::string line;
@@ -433,7 +405,11 @@ void clear_all_tunnel_dns()
         if (start == std::string::npos) continue;
         const auto end = line.find(suffix, start);
         if (end == std::string::npos) continue;
-        run_scutil("remove " + line.substr(start, end + suffix.size()) + "\nquit\n");
+        const auto interface_start = start + prefix.size();
+        const std::string owner = line.substr(interface_start, end - interface_start);
+        if (std::find(live_interfaces.begin(), live_interfaces.end(), owner) == live_interfaces.end()) {
+            run_scutil("remove " + line.substr(start, end + suffix.size()) + "\nquit\n");
+        }
     }
 }
 
@@ -521,6 +497,7 @@ void management_loop(unsigned short port, std::atomic<bool>& stopping, std::mute
     std::array<char, 4096> chunk{};
     auto last_interface_update = std::chrono::steady_clock::now();
     bool interface_baseline_set = false;
+    bool was_connected = false;
     std::uint64_t baseline_uploaded = 0;
     std::uint64_t baseline_downloaded = 0;
     std::pair<std::uint64_t, std::uint64_t> baseline_interface{};
@@ -589,6 +566,7 @@ void management_loop(unsigned short port, std::atomic<bool>& stopping, std::mute
                     start = end + 1;
                 }
                 if (fields.size() >= 4 && fields[1] == "CONNECTED") {
+                    was_connected = true;
                     std::lock_guard<std::mutex> lock(output_mutex);
                     tunnel_ip = fields[3];
                     const auto interface_name = find_tunnel_interface_for_ip(tunnel_ip);
@@ -601,6 +579,11 @@ void management_loop(unsigned short port, std::atomic<bool>& stopping, std::mute
                     }
                     apply_tunnel_dns(find_tunnel_interface_for_ip(tunnel_ip), dns, dns_search);
                     emit_status(3, tunnel_ip, "", dns, dns_search,
+                        cipher.empty() ? "OpenVPN" : cipher, uploaded, downloaded);
+                } else if (was_connected && fields.size() >= 2 &&
+                    (fields[1] == "RECONNECTING" || fields[1] == "WAIT" || fields[1] == "AUTH")) {
+                    std::lock_guard<std::mutex> lock(output_mutex);
+                    emit_status(2, tunnel_ip, "", dns, dns_search,
                         cipher.empty() ? "OpenVPN" : cipher, uploaded, downloaded);
                 }
             } else if (line.rfind(">BYTECOUNT:", 0) == 0) {
@@ -667,12 +650,16 @@ int main(int argc, char** argv)
     // Recover from a previous helper/app crash before creating a new
     // resolver. Only the app-owned service namespace is touched.
     clear_all_tunnel_dns();
-    const auto baseline_network_dns = capture_network_dns_state();
 
     std::string username;
     std::string password;
     std::getline(std::cin, username);
     std::getline(std::cin, password);
+    std::string route_mode_text, custom_routes;
+    std::getline(std::cin, route_mode_text);
+    std::getline(std::cin, custom_routes);
+    int route_mode = 0;
+    try { route_mode = std::stoi(route_mode_text); } catch (...) {}
 
     if (openvpn_auth_user_pass_from_stdin(config) &&
         (username.empty() || password.empty())) {
@@ -782,6 +769,40 @@ int main(int argc, char** argv)
         close(output_pipe[0]);
         close(output_pipe[1]);
         std::vector<std::string> arguments = { openvpn, "--config", config };
+        // Ensure silent network loss is reported through the management
+        // state channel even when the imported profile has no keepalive.
+        if (!configured_openvpn_keepalive(config)) {
+            arguments.insert(arguments.end(), {"--ping", "10", "--ping-restart", "30"});
+        }
+        if (route_mode == 1 || route_mode == 2) {
+            arguments.push_back("--route-nopull");
+            if (route_mode == 1) {
+                arguments.insert(arguments.end(), {"--route", "0.0.0.0", "0.0.0.0"});
+                arguments.insert(arguments.end(), {"--route-ipv6", "::/0"});
+            } else {
+                size_t start = 0;
+                while (start < custom_routes.size()) {
+                    const size_t end = custom_routes.find('|', start);
+                    const std::string cidr = custom_routes.substr(start, end == std::string::npos ? end : end - start);
+                    const size_t slash = cidr.find('/');
+                    const std::string address = cidr.substr(0, slash);
+                    int prefix = 32;
+                    if (slash != std::string::npos) {
+                        try { prefix = std::stoi(cidr.substr(slash + 1)); } catch (...) { prefix = -1; }
+                    }
+                    in_addr parsed{};
+                    if (prefix >= 0 && prefix <= 32 && inet_pton(AF_INET, address.c_str(), &parsed) == 1) {
+                        const uint32_t mask = prefix == 0 ? 0 : htonl(0xffffffffu << (32 - prefix));
+                        in_addr netmask{mask};
+                        char mask_text[INET_ADDRSTRLEN]{};
+                        inet_ntop(AF_INET, &netmask, mask_text, sizeof(mask_text));
+                        arguments.insert(arguments.end(), {"--route", address, mask_text});
+                    }
+                    if (end == std::string::npos) break;
+                    start = end + 1;
+                }
+            }
+        }
         // Some exported .ovpn bundles omit the device because the original
         // client supplied it implicitly. Preserve an explicit device and
         // provide the normal tunnel device only when it is absent.
@@ -962,7 +983,6 @@ int main(int argc, char** argv)
     unlink(status_file.c_str());
     clear_tunnel_dns(tunnel_interface);
     clear_all_tunnel_dns();
-    restore_network_dns_state(baseline_network_dns);
     emit_status(1, "", "", "", "", "", 0, 0);
     return connected && WIFEXITED(child_status) && WEXITSTATUS(child_status) == 0 ? 0 : 1;
 }

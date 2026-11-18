@@ -66,6 +66,18 @@ int main(int argc, char** argv)
     // they never appear in the helper's argument list or process table.
     std::getline(std::cin, profile.username);
     std::getline(std::cin, profile.password);
+    std::string routes;
+    std::getline(std::cin, routes);
+    try { profile.route_policy = std::stoi(routes); } catch (...) { profile.route_policy = 0; }
+    std::getline(std::cin, routes);
+    size_t start = 0;
+    while (start <= routes.size()) {
+        const size_t end = routes.find('|', start);
+        const std::string route = routes.substr(start, end == std::string::npos ? end : end - start);
+        if (!route.empty()) profile.routes.push_back({route, "", ""});
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
 
     StdioEvents events;
     openconnect::core::OpenConnectSession session;

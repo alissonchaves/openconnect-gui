@@ -93,16 +93,24 @@ private struct VPNProfileTreeView: View {
                         DisclosureGroup {
                             HStack {
                                 Button("Use") { model.select(profile: profile) }
-                                    .disabled(model.state != .disconnected)
                                 Button("Connect") { model.connect(profile: profile) }
-                                    .disabled(model.state != .disconnected)
+                                    .disabled(model.isConnected(profile))
+                                if model.isConnected(profile) {
+                                    Button("Disconnect", role: .destructive) { model.disconnect(profileName: profile.name) }
+                                }
                                 Button("Edit") { model.requestEdit(profile: profile) }
+                                    .disabled(model.isConnected(profile))
                                 Button("Remove", role: .destructive) { model.remove(profile: profile) }
                                     .disabled(!model.canRemove(profile: profile))
                             }
                             .padding(.vertical, 5)
                         } label: {
-                            Label(profile.name, systemImage: model.selectedProfile == profile.name ? "checkmark.circle.fill" : "circle")
+                            HStack {
+                                Label(profile.name, systemImage: model.isConnected(profile) ? "network" : (model.selectedProfile == profile.name ? "checkmark.circle.fill" : "circle"))
+                                if model.isConnected(profile) {
+                                    Text("Connected").font(.caption).foregroundStyle(.green)
+                                }
+                            }
                         }
                     }
                 }
@@ -146,11 +154,11 @@ private struct HelpView: View {
                     .font(.largeTitle.weight(.semibold))
                 Group {
                     Text("Getting started").font(.title2.weight(.semibold))
-                    Text("Create a VPN profile, choose the provider, fill in the gateway and credentials, then select Connect. You can also connect directly from the tray menu.")
+                    Text("Create a VPN profile, choose the provider, fill in the gateway and credentials, then select Connect. Multiple profiles can stay connected at once; connect or disconnect each one from the VPN Profile list.")
                 }
                 Group {
                     Text("VPN profiles").font(.title2.weight(.semibold))
-                    Text("The VPN Profile section lists registered profiles. Expand a profile to use, connect, edit or remove it. New Profile creates a new connection.")
+                    Text("The VPN Profile section lists registered profiles. Expand a profile to use, connect, disconnect, edit or remove it. Each profile has its own route policy: use the server routes, send all traffic through the VPN, or specify IPv4 CIDR networks.")
                 }
                 Group {
                     Text("Provider compatibility").font(.title2.weight(.semibold))
@@ -167,7 +175,7 @@ private struct HelpView: View {
                 }
                 Group {
                     Text("Troubleshooting").font(.title2.weight(.semibold))
-                    Text("If a connection fails, check the Log tab first. Confirm that the server name resolves on the current network, that the .ovpn paths are valid, and that the VPN profile uses the correct provider.")
+                    Text("The app checks OpenConnect and OpenVPN TCP servers periodically and disconnects a tunnel that cannot recover, restoring its interface, DNS and routes. OpenVPN UDP profiles use OpenVPN's own reconnect state and the app disconnects them before the Mac sleeps. If a connection fails, check the Log tab, confirm that the server resolves on the current network, and verify that the .ovpn path and provider are correct.")
                 }
 #if DEBUG
                 Group {
@@ -194,16 +202,19 @@ private struct ConnectionView: View {
     @State private var showingNewProfile = false
 
     var body: some View {
+        let selectedState = model.state(for: model.selectedProfile)
         VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .center, spacing: 16) {
             HStack(spacing: 14) {
-                AppIconView(size: 48, state: model.state)
+                AppIconView(size: 48, state: selectedState)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(model.state.title)
+                    Text(selectedState.title)
                         .font(.title2.weight(.semibold))
                     Text(model.selectedProfile ?? "No VPN profile selected")
                         .foregroundStyle(.secondary)
                 }
             }
+            .frame(maxWidth: .infinity)
 
             Picker("VPN Profile", selection: Binding<String?>(
                 get: { model.selectedProfile },
@@ -215,6 +226,7 @@ private struct ConnectionView: View {
                 }
             }
             .pickerStyle(.menu)
+            .fixedSize()
 
             HStack {
                 Button("New Profile") {
@@ -227,7 +239,7 @@ private struct ConnectionView: View {
                         editingProfile = profile
                     }
                 }
-                .disabled(model.selectedProfile == nil)
+                .disabled(model.selectedProfile == nil || model.selectedProfile.flatMap { model.profile(named: $0) }.map { model.isConnected($0) } == true)
 
                 Button("Remove Profile", role: .destructive) {
                     if let selected = model.selectedProfile,
@@ -238,19 +250,47 @@ private struct ConnectionView: View {
                 .disabled(model.selectedProfile == nil ||
                           (model.selectedProfile.flatMap { name in model.profile(named: name) }.map { !model.canRemove(profile: $0) } ?? true))
             }
+            .frame(maxWidth: .infinity)
 
             HStack {
-                Button(model.state == .connecting ? "Cancel" : "Connect") {
-                    model.connect()
+                if model.canDisconnect {
+                    Button("Disconnect") { model.disconnect() }.buttonStyle(.bordered)
+                } else {
+                    Button(selectedState == .connecting ? "Connecting…" : "Connect") { model.connect() }
+                        .buttonStyle(.borderedProminent).disabled(!model.canConnect)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(!model.canConnect)
+            }
+            .frame(maxWidth: .infinity)
+            }
 
-                Button("Disconnect") {
-                    model.disconnect()
+            if !model.activeProfiles.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("Active Connections").font(.headline)
+                        Spacer()
+                        Button("Disconnect All", role: .destructive) { model.disconnectAll() }
+                    }
+                    ScrollView {
+                        VStack(spacing: 8) {
+                            ForEach(model.activeProfiles) { profile in
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(profile.name).font(.body.weight(.medium))
+                                        Text(model.state(for: profile.name).title)
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Button("Disconnect") { model.disconnect(profileName: profile.name) }
+                                        .disabled(model.state(for: profile.name) == .disconnecting)
+                                }
+                                .padding(10)
+                                .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 180)
                 }
-                .buttonStyle(.bordered)
-                .disabled(!model.canDisconnect)
             }
 
             Spacer()
@@ -327,6 +367,22 @@ private struct ProfileEditorView: View {
                     TextField("Username", text: $profile.username)
                     SecureField("Password", text: $profile.password)
                 }
+                Section("VPN Routes") {
+                    Picker("Routing policy", selection: $profile.routeMode) {
+                        Text("Use server-provided routes").tag("server")
+                        Text("Route all traffic").tag("all")
+                        Text("Use custom routes").tag("custom")
+                    }
+                    if profile.routeMode == "custom" {
+                        Text("Enter one network per line in CIDR notation (e.g., 10.20.0.0/16).")
+                            .font(.caption).foregroundStyle(.secondary)
+                        TextEditor(text: $profile.customRoutes)
+                            .font(.system(.body, design: .monospaced))
+                            .frame(minHeight: 90)
+                    }
+                    Text("Routes to VPN servers always use your internet connection.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             .formStyle(.grouped)
 
@@ -346,7 +402,7 @@ private struct ProfileEditorView: View {
             }
         }
         .padding(24)
-        .frame(width: 420)
+        .frame(width: 520, height: 620)
         .onAppear { openVPNDetails = OpenVPNConfigDetails.load(path: profile.openvpnConfigPath) }
         .onChange(of: profile.openvpnConfigPath) { path in
             openVPNDetails = OpenVPNConfigDetails.load(path: path)
@@ -423,16 +479,27 @@ private struct VPNInfoView: View {
 
     var body: some View {
         Form {
-            LabeledContent("IPv4", value: model.details.ipv4.isEmpty ? "—" : model.details.ipv4)
-            LabeledContent("IPv6", value: model.details.ipv6.isEmpty ? "—" : model.details.ipv6)
-            LabeledContent("DNS", value: model.details.dns.isEmpty ? "—" : model.details.dns)
-            LabeledContent("DNS Search", value: model.details.dnsSearch.isEmpty ? "—" : model.details.dnsSearch)
-            LabeledContent("Cipher", value: model.details.cipher.isEmpty ? "—" : model.details.cipher)
-            LabeledContent("DTLS Cipher", value: model.details.dtlsCipher.isEmpty ? "—" : model.details.dtlsCipher)
-            LabeledContent("Download", value: model.details.download.isEmpty ? "—" : model.details.download)
-            LabeledContent("Upload", value: model.details.upload.isEmpty ? "—" : model.details.upload)
-            LabeledContent("Download Speed", value: model.details.downloadSpeed.isEmpty ? "—" : model.details.downloadSpeed)
-            LabeledContent("Upload Speed", value: model.details.uploadSpeed.isEmpty ? "—" : model.details.uploadSpeed)
+            if model.activeProfiles.isEmpty {
+                Text("No active VPN connections")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(model.activeProfiles) { profile in
+                    let details = model.details(for: profile.name)
+                    Section(profile.name) {
+                        LabeledContent("Status", value: model.state(for: profile.name).title)
+                        LabeledContent("IPv4", value: details.ipv4.isEmpty ? "—" : details.ipv4)
+                        LabeledContent("IPv6", value: details.ipv6.isEmpty ? "—" : details.ipv6)
+                        LabeledContent("DNS", value: details.dns.isEmpty ? "—" : details.dns)
+                        LabeledContent("DNS Search", value: details.dnsSearch.isEmpty ? "—" : details.dnsSearch)
+                        LabeledContent("Cipher", value: details.cipher.isEmpty ? "—" : details.cipher)
+                        LabeledContent("DTLS Cipher", value: details.dtlsCipher.isEmpty ? "—" : details.dtlsCipher)
+                        LabeledContent("Download", value: details.download.isEmpty ? "—" : details.download)
+                        LabeledContent("Upload", value: details.upload.isEmpty ? "—" : details.upload)
+                        LabeledContent("Download Speed", value: details.downloadSpeed.isEmpty ? "—" : details.downloadSpeed)
+                        LabeledContent("Upload Speed", value: details.uploadSpeed.isEmpty ? "—" : details.uploadSpeed)
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
         .navigationTitle("VPN Info")

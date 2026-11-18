@@ -42,13 +42,13 @@ runtime dependencies, signs the app, and generates:
 Set the release version explicitly:
 
 ```bash
-APP_VERSION=2.0.0 macos/build-native-release.sh /tmp/OpenConnect-for-Mac
+APP_VERSION=2.1.0 macos/build-native-release.sh /tmp/OpenConnect-for-Mac
 ```
 
 For a build using the currently installed dependency versions:
 
 ```bash
-SKIP_BREW_UPDATE=1 APP_VERSION=2.0.0 \
+SKIP_BREW_UPDATE=1 APP_VERSION=2.1.0 \
   macos/build-native-release.sh /tmp/OpenConnect-for-Mac
 ```
 

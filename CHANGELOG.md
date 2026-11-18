@@ -1,5 +1,13 @@
 History of user-visible changes.
 
+## [v2.1.0] (2026-11-18)
+- Connect multiple VPN profiles at the same time;
+- Choose full-tunnel, server-provided or custom routes per profile, while keeping VPN server routes on the internet connection;
+- Restore VPN interfaces, DNS and routes after stale connections, sleep or network changes;
+- Show each active VPN in Connection, VPN Info and the menu bar, with per-connection and disconnect-all actions;
+- Reuse administrator authorization across VPN helper launches while the app remains open;
+- Keep the native macOS interface in English.
+
 ## [v2.0.0] (2026-08-09)
 - Native SwiftUI/AppKit macOS application;
 - Native OpenConnect and OpenVPN backends;

@@ -17,7 +17,7 @@ fi
 output="$1"
 configuration="${2:-release}"
 bundle_version="${APP_BUNDLE_VERSION:-$(date +%s)}"
-app_version="${APP_VERSION:-2.0.0}"
+app_version="${APP_VERSION:-2.1.0}"
 # Release bundles are self-contained by default. Set this to 0 only for a
 # development build that intentionally uses Homebrew at runtime.
 BUNDLE_HOMEBREW_DEPENDENCIES="${BUNDLE_HOMEBREW_DEPENDENCIES:-1}"
@@ -25,8 +25,8 @@ MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-26.0}"
 export MACOSX_DEPLOYMENT_TARGET
 icon_resource="OpenConnectIcon-${bundle_version}"
 package_root="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-build_root="$package_root/.build/arm64-apple-macosx/$configuration"
-binary="$build_root/OpenConnectMac"
+binary_dir="$(swift build --package-path "$package_root" -c "$configuration" --show-bin-path)"
+binary="$binary_dir/OpenConnectMac"
 
 swift build --package-path "$package_root" -c "$configuration" \
     -Xswiftc -target -Xswiftc "arm64-apple-macosx${MACOSX_DEPLOYMENT_TARGET}"
